@@ -2,16 +2,16 @@ FROM ghcr.io/puppeteer/puppeteer:latest
 
 WORKDIR /app
 
-# 1) Manifest-Dateien
+# Manifest-Dateien
 COPY ../../package*.json ./
-COPY ../../pnpm-workspace.yaml ./          # <-- hinzu
+COPY ../../pnpm-workspace.yaml ./
 COPY ../../pnpm-lock.yaml ./
 
-# 2) Quellcode der Workspaces vor der Installation kopieren
+# Workspace-Quellcode
 COPY ../../packages ./packages
 COPY clients/acme-worker/run-worker.ts /app/run-worker.ts
 
-# 3) Abhängigkeiten als root installieren, dann zurückwechseln
+# Abhängigkeiten (als root) → zurück zu pptruser
 USER root
 RUN npm install -g pnpm@8 --unsafe-perm \
  && pnpm install --prod \
