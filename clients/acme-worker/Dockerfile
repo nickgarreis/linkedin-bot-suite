@@ -6,6 +6,7 @@ WORKDIR /app
 COPY ../../package*.json ./
 COPY ../../pnpm-workspace.yaml ./
 COPY ../../pnpm-lock.yaml ./
+COPY ../../tsconfig.json ./
 
 # Workspace-Quellcode
 COPY ../../packages ./packages
@@ -16,8 +17,9 @@ USER root
 RUN npm install -g pnpm@8 --unsafe-perm \
  && pnpm install --prod \
  && pnpm add -w ts-node typescript --save-dev \
+ && pnpm exec tsc \
  && npm install -g ts-node typescript
 USER pptruser
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-CMD ["node","--loader","ts-node/esm","clients/acme-worker/run-worker.ts"]
+CMD ["node","dist/clients/acme-worker/run-worker.js"]
