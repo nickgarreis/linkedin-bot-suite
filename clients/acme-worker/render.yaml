@@ -7,7 +7,7 @@ services:
     autoDeploy: true
     envVars:
       - key: REDIS_URL
-        value: "redis://default:password@acme-redis:6379"
+        value: "redis://acme-redis:10000"
       - key: SUPABASE_URL
         value: "https://pkvnfcxdodzwbvcxkmxj.supabase.co"
       - key: SUPABASE_SERVICE_ROLE
