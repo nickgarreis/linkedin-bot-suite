@@ -11,10 +11,18 @@ export function initSupabase() {
   );
 }
 
-export const jobQueue = new Queue(process.env.QUEUE_NAME || 'jobs', {
-  connection: { url: process.env.REDIS_URL! }
+const queueName = process.env.QUEUE_NAME || 'jobs';
+const prefix    = process.env.BULLMQ_PREFIX || 'bull';
+const redis     = { url: process.env.REDIS_URL! };
+
+export const jobQueue = new Queue(queueName, {
+  prefix,
+  connection: redis
 });
 
-new QueueEvents(process.env.QUEUE_NAME || 'jobs', {
-  connection: { url: process.env.REDIS_URL! }
-}).on('completed', ({ jobId }) => log.info({ jobId }, '✅ Job done'));
+new QueueEvents(queueName, {
+  prefix,
+  connection: redis
+}).on('completed', ({ jobId }) => {
+  log.info({ jobId }, '✅ Job erledigt');
+});
