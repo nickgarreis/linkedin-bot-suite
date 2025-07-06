@@ -9,7 +9,7 @@ COPY ../../pnpm-lock.yaml ./
 
 # Workspace-Quellcode
 COPY ../../packages ./packages
-COPY clients/acme-worker/run-worker.ts /app/run-worker.ts
+COPY clients/acme-worker/run-worker.ts clients/acme-worker/run-worker.ts
 
 # Abhängigkeiten (als root) → zurück zu pptruser
 USER root
