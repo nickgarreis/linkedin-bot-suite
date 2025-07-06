@@ -9,9 +9,9 @@ services:
       - key: REDIS_URL
         value: "redis://default:password@acme-redis:6379"
       - key: SUPABASE_URL
-        value: "https://YOUR_ACME_PROJECT.supabase.co"
+        value: "https://pkvnfcxdodzwbvcxkmxj.supabase.co"
       - key: SUPABASE_SERVICE_ROLE
-        value: "YOUR_SUPABASE_SERVICE_ROLE_KEY"
+        value: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdm5mY3hkb2R6d2J2Y3hrbXhqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MTI4MzI5OSwiZXhwIjoyMDY2ODU5Mjk5fQ.TnW_d3ekcNi3uNaWrympT37qjvG2V_p0pl-MdpCffWs"
       - key: QUEUE_NAME
         value: "acme:jobs"
       - key: LINKEDIN_COOKIES_PATH
