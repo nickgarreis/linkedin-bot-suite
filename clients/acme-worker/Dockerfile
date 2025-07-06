@@ -15,6 +15,7 @@ COPY clients/acme-worker/run-worker.ts clients/acme-worker/run-worker.ts
 USER root
 RUN npm install -g pnpm@8 --unsafe-perm \
  && pnpm install --prod \
+ && pnpm add -w ts-node typescript --save-dev \
  && npm install -g ts-node typescript
 USER pptruser
 
