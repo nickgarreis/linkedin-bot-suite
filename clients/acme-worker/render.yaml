@@ -1,0 +1,20 @@
+services:
+  - type: worker
+    name: acme-linkedin-worker
+    env: docker
+    region: frankfurt
+    dockerfilePath: Dockerfile
+    autoDeploy: true
+    envVars:
+      - key: REDIS_URL
+        value: "redis://default:password@acme-redis:6379"
+      - key: SUPABASE_URL
+        value: "https://YOUR_ACME_PROJECT.supabase.co"
+      - key: SUPABASE_SERVICE_ROLE
+        value: "YOUR_SUPABASE_SERVICE_ROLE_KEY"
+      - key: QUEUE_NAME
+        value: "acme:jobs"
+      - key: LINKEDIN_COOKIES_PATH
+        value: "/secrets/cookies/acme.json"
+      - key: PROXY_URL
+        value: "http://user:pass@proxy:8000"
