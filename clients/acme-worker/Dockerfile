@@ -19,4 +19,4 @@ RUN npm install -g pnpm@8 --unsafe-perm \
 USER pptruser
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-CMD ["pnpm","exec","ts-node","clients/acme-worker/run-worker.ts"]
+CMD ["pnpm","exec","ts-node-esm","clients/acme-worker/run-worker.ts"]
