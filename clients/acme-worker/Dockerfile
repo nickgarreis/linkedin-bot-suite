@@ -1,4 +1,4 @@
-FROM ghcr.io/puppeteer/puppeteer:20
+FROM ghcr.io/puppeteer/puppeteer:latest
 
 WORKDIR /app
 COPY ../../package*.json ./
