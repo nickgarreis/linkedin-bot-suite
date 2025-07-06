@@ -3,7 +3,9 @@ FROM ghcr.io/puppeteer/puppeteer:latest
 WORKDIR /app
 COPY ../../package*.json ./
 COPY ../../pnpm-lock.yaml ./
-RUN npm install -g pnpm@8 && pnpm install --prod
+USER root
+RUN npm install -g pnpm@8 --unsafe-perm && pnpm install --prod
+USER pptruser
 
 COPY ../../packages ./packages
 COPY clients/acme-worker/run-worker.ts /app/run-worker.ts
