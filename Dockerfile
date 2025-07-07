@@ -57,7 +57,7 @@ COPY packages/ ./packages/
 COPY tsconfig.json ./
 
 # Build all packages
-RUN pnpm run build
+RUN pnpm run build:clean && pnpm run build
 
 # Verify Chrome binary exists and is executable
 RUN /usr/bin/google-chrome-stable --version
