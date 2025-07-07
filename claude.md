@@ -49,7 +49,7 @@ This is a LinkedIn bot suite built as a monorepo using pnpm workspaces. The proj
 - **Queue System**: BullMQ with Redis for job management
 - **Database**: Supabase with RLS policies and enhanced schema
 - **Web Automation**: Puppeteer with stealth plugin for LinkedIn interaction
-- **Language**: TypeScript with strict mode enabled
+- **Language**: TypeScript with strict mode and composite builds
 - **Package Management**: pnpm with workspaces
 - **Deployment**: Render.com with Docker containers
 
@@ -57,10 +57,13 @@ This is a LinkedIn bot suite built as a monorepo using pnpm workspaces. The proj
 
 ### Build Commands
 ```bash
-# Build all packages in correct order
+# Build all packages using TypeScript composite builds
 pnpm run build
 
-# Build specific packages
+# Clean build artifacts
+pnpm run build:clean
+
+# Build specific packages (legacy commands)
 pnpm run build:shared
 pnpm run build:linkedin
 pnpm run build:bot-core
@@ -127,6 +130,10 @@ pnpm add -D <package> -w
 - `QUEUE_NAME` - BullMQ queue name (default: linkedin-jobs)
 - `BULLMQ_PREFIX` - BullMQ key prefix (default: bull)
 
+### Dependency Notes
+- `@solana/wallet-standard-features` - Required for Supabase compatibility
+- BullMQ `removeOnComplete`/`removeOnFail` use object format: `{ count: N }`
+
 ## Database Schema
 
 Use `scripts/enhanced-schema.sql` for complete database setup.
@@ -180,6 +187,19 @@ Use configurations in `deployments/render/`:
 3. **Redis** - Queue and caching (managed by Render)
 4. **Supabase** - Database and authentication (external)
 
+## Build System & TypeScript Configuration
+
+### TypeScript Setup
+- **Composite builds**: Each package has its own `tsconfig.json` with proper references
+- **Build order**: Dependencies are built automatically via TypeScript project references
+- **Type checking**: Run `pnpm run typecheck` to check all packages
+- **Workspace resolution**: Internal package imports are properly resolved
+
+### Common Build Issues & Solutions
+- **Lockfile out of sync**: Run `rm pnpm-lock.yaml && pnpm install`
+- **Build errors**: Ensure dependencies are built first with `pnpm run build`
+- **Type errors**: Check that all workspace packages are properly referenced in tsconfig.json
+
 ## LinkedIn Automation Notes
 
 - Uses cookie-based authentication (no username/password login)
@@ -189,3 +209,4 @@ Use configurations in `deployments/render/`:
 - Includes proxy support for IP rotation
 - Respects rate limits and daily invitation quotas
 - Provides detailed error reporting and retry logic
+- Uses Promise-based delays instead of deprecated `page.waitForTimeout()`
