@@ -28,10 +28,10 @@ export async function initLinkedInContext(
       '--disable-features=IsolateOrigins,site-per-process',
       '--no-first-run',
       '--no-default-browser-check',
-      // Memory optimization
-      '--max_old_space_size=512',
-      '--memory-pressure-off',
       '--disable-features=VizDisplayCompositor',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
       '--data-path=/tmp/chrome-data',
       '--homedir=/tmp',
       '--disable-crash-reporter',
@@ -48,56 +48,206 @@ export async function initLinkedInContext(
     
     const page = await browser.newPage();
     console.log('Page created successfully');
-  
-  // Set user agent to look more like a real browser
-  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-  
-  // Set cookies from environment
-  const cookies = JSON.parse(process.env.LINKEDIN_COOKIES_JSON!);
-  await page.setCookie(...cookies);
-
-  // Navigate to LinkedIn and verify login with redirect handling
-  try {
-    console.log('Navigating to LinkedIn feed...');
-    await page.goto('https://www.linkedin.com/feed', { 
-      waitUntil: 'networkidle0',
-      timeout: 30000 
+    
+    // Set viewport
+    await page.setViewport({ width: 1920, height: 1080 });
+    
+    // Set user agent BEFORE navigating - updated to latest Chrome
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    
+    // Set additional headers to appear more legitimate
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1'
     });
-  } catch (error) {
-    // Try going to the home page instead
-    console.log('Feed redirect failed, trying home page...');
+    
+    // Parse and set cookies
+    const cookies = JSON.parse(process.env.LINKEDIN_COOKIES_JSON!);
+    console.log(`Setting ${cookies.length} cookies...`);
+    
+    // Set cookies one by one to handle errors
+    for (const cookie of cookies) {
+      try {
+        await page.setCookie(cookie);
+      } catch (err) {
+        console.error(`Failed to set cookie ${cookie.name}:`, err);
+      }
+    }
+
+  // Staged navigation flow - first go to main page to establish session
+  let currentUrl = '';
+  let redirectCount = 0;
+  const maxRedirects = 5;
+  
+  try {
+    console.log('Stage 1: Navigating to LinkedIn main page to establish session...');
     await page.goto('https://www.linkedin.com/', { 
       waitUntil: 'networkidle0',
       timeout: 30000 
     });
+    
+    // Wait for session to establish
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    currentUrl = page.url();
+    console.log('Stage 1 complete. Current URL:', currentUrl);
+    
+    // Check for immediate redirect to login
+    if (currentUrl.includes('/login') || currentUrl.includes('/authwall')) {
+      throw new Error('LinkedIn authentication failed - redirected to login page immediately. Cookies may be invalid or expired.');
+    }
+    
+    // Stage 2: Navigate to feed
+    console.log('Stage 2: Navigating to LinkedIn feed...');
+    
+    // Listen for navigation events to detect redirect loops
+    page.on('response', (response) => {
+      if (response.status() >= 300 && response.status() < 400) {
+        redirectCount++;
+        console.log(`Redirect ${redirectCount}: ${response.status()} to ${response.headers().location}`);
+        
+        if (redirectCount >= maxRedirects) {
+          throw new Error(`Too many redirects detected (${redirectCount}). Possible redirect loop.`);
+        }
+      }
+    });
+    
+    await page.goto('https://www.linkedin.com/feed', { 
+      waitUntil: 'networkidle0',
+      timeout: 30000 
+    });
+    
+    // Wait for any final redirects to settle
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+  } catch (error) {
+    currentUrl = page.url();
+    console.log('Navigation error. Current URL:', currentUrl);
+    
+    // Take screenshot for debugging
+    try {
+      const screenshotPath = `/tmp/linkedin-auth-error-${Date.now()}.png` as const;
+      await page.screenshot({ path: screenshotPath, fullPage: true });
+      console.log(`Screenshot saved to: ${screenshotPath}`);
+    } catch (screenshotError) {
+      console.error('Failed to take screenshot:', screenshotError);
+    }
+    
+    // Enhanced error analysis
+    const errorAnalysis = await page.evaluate(() => {
+      return {
+        title: document.title,
+        hasLoginForm: !!document.querySelector('form[action*="login"]'),
+        hasAuthWall: !!document.querySelector('.authwall'),
+        hasChallenge: !!document.querySelector('.challenge'),
+        hasError: !!document.querySelector('.error-message'),
+        bodyClasses: document.body.className,
+        currentPath: window.location.pathname,
+        hasRedirectMeta: !!document.querySelector('meta[http-equiv="refresh"]'),
+        pageText: document.body.innerText.substring(0, 500)
+      };
+    });
+    
+    console.log('Error analysis:', errorAnalysis);
+    
+    // Check if we ended up on login page
+    if (currentUrl.includes('/login') || currentUrl.includes('/authwall') || errorAnalysis.hasLoginForm || errorAnalysis.hasAuthWall) {
+      throw new Error(`LinkedIn authentication failed - redirected to login page. Cookies may be invalid or expired. Page analysis: ${JSON.stringify(errorAnalysis)}`);
+    }
+    
+    // If it's a redirect loop error, provide specific message
+    if (error instanceof Error && error.message.includes('Too many redirects')) {
+      throw new Error(`LinkedIn authentication failed - redirect loop detected. This usually indicates cookie issues. Page analysis: ${JSON.stringify(errorAnalysis)}`);
+    }
+    
+    // Check for security challenges or verification
+    if (errorAnalysis.hasChallenge || currentUrl.includes('/challenge')) {
+      throw new Error(`LinkedIn security challenge detected. Manual verification may be required. Page analysis: ${JSON.stringify(errorAnalysis)}`);
+    }
+    
+    // For other navigation errors, try emergency fallback
+    console.log('Primary navigation failed, attempting emergency fallback...');
+    try {
+      await page.goto('https://www.linkedin.com/feed/?doFeedRefresh=true', { 
+        waitUntil: 'domcontentloaded',
+        timeout: 20000 
+      });
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    } catch (fallbackError) {
+      // Take final screenshot before failing
+      try {
+        const finalScreenshotPath = `/tmp/linkedin-final-error-${Date.now()}.png` as const;
+        await page.screenshot({ path: finalScreenshotPath, fullPage: true });
+        console.log(`Final screenshot saved to: ${finalScreenshotPath}`);
+      } catch (finalScreenshotError) {
+        console.error('Failed to take final screenshot:', finalScreenshotError);
+      }
+      
+      throw new Error(`Navigation failed completely. Original error: ${error instanceof Error ? error.message : 'Unknown error'}. Fallback error: ${fallbackError instanceof Error ? fallbackError.message : 'Unknown fallback error'}. Page analysis: ${JSON.stringify(errorAnalysis)}`);
+    }
   }
 
-  // Wait a bit for any redirects to settle
-  await new Promise(resolve => setTimeout(resolve, 2000));
-
-  // Check current URL to see if we were redirected to login
-  const currentUrl = page.url();
-  console.log('Current URL after navigation:', currentUrl);
+  // Final URL check
+  currentUrl = page.url();
+  console.log('Final URL after navigation:', currentUrl);
 
   if (currentUrl.includes('/login') || currentUrl.includes('/authwall')) {
     throw new Error('LinkedIn authentication failed - redirected to login page. Cookies may be invalid or expired.');
   }
 
-  // Alternative login check - look for navigation elements
-  const loggedIn = await page.evaluate(() => {
-    return !!(
-      document.querySelector('nav.global-nav') || 
-      document.querySelector('[data-test-global-nav]') ||
-      document.querySelector('.feed-identity-module') ||
-      document.querySelector('.global-nav__me')
-    );
+  // Enhanced login verification with multiple checkpoints
+  const loginCheckpoints = await page.evaluate(() => {
+    const checkpoints = {
+      globalNav: !!document.querySelector('nav.global-nav'),
+      testGlobalNav: !!document.querySelector('[data-test-global-nav]'),
+      feedIdentity: !!document.querySelector('.feed-identity-module'),
+      globalNavMe: !!document.querySelector('.global-nav__me'),
+      profileNav: !!document.querySelector('.global-nav__me-content'),
+      feedContainer: !!document.querySelector('.feed-container-theme'),
+      hasLinkedInClass: document.body.classList.contains('linkedin')
+    };
+    
+    console.log('Login checkpoints:', checkpoints);
+    return checkpoints;
   });
 
+  const loggedIn = Object.values(loginCheckpoints).some(checkpoint => checkpoint);
+  
   if (!loggedIn) {
-    throw new Error('LinkedIn authentication failed - unable to verify login status');
+    console.log('Login verification failed. Checkpoints:', loginCheckpoints);
+    
+    // Take screenshot for debugging login verification failure
+    try {
+      const verificationScreenshotPath = `/tmp/linkedin-verification-failed-${Date.now()}.png` as const;
+      await page.screenshot({ path: verificationScreenshotPath, fullPage: true });
+      console.log(`Verification failure screenshot saved to: ${verificationScreenshotPath}`);
+    } catch (screenshotError) {
+      console.error('Failed to take verification screenshot:', screenshotError);
+    }
+    
+    // Additional page analysis for verification failure
+    const verificationAnalysis = await page.evaluate(() => {
+      return {
+        title: document.title,
+        url: window.location.href,
+        hasLinkedInBranding: !!document.querySelector('.linkedin-logo'),
+        hasHeader: !!document.querySelector('header'),
+        hasMain: !!document.querySelector('main'),
+        bodyClasses: document.body.className,
+        pageText: document.body.innerText.substring(0, 300)
+      };
+    });
+    
+    console.log('Verification analysis:', verificationAnalysis);
+    
+    throw new Error(`LinkedIn authentication failed - unable to verify login status. No recognizable LinkedIn UI elements found. Checkpoints: ${JSON.stringify(loginCheckpoints)}. Page analysis: ${JSON.stringify(verificationAnalysis)}`);
   }
 
-  console.log('Successfully authenticated with LinkedIn');
+  console.log('Successfully authenticated with LinkedIn. Checkpoints passed:', 
+    Object.entries(loginCheckpoints).filter(([_, passed]) => passed).map(([name]) => name).join(', '));
 
     return { browser, page };
   } catch (error) {
