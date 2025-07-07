@@ -70,6 +70,9 @@ RUN useradd -r -u 1001 -g nodejs -m -d /home/nodejs nodejs
 RUN mkdir -p /tmp/chrome-user-data /tmp/chrome-data /home/nodejs/.local/share/applications && \
     chown -R nodejs:nodejs /tmp/chrome-user-data /tmp/chrome-data /home/nodejs
 
+# Set HOME environment variable for Chrome
+ENV HOME=/home/nodejs
+
 # Change to nodejs user
 USER nodejs
 
