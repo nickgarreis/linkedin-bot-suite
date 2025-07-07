@@ -15,7 +15,7 @@
     "bullmq": "^5.56.1",
     "dotenv": "^17.0.1",
     "ioredis": "^5.6.1",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "2.7.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.10",
