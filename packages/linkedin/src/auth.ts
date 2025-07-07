@@ -1,4 +1,4 @@
-import { Browser, BrowserContext } from 'puppeteer';
+import { Browser, Page } from 'puppeteer';
 import Puppeteer from 'puppeteer';
 import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
@@ -6,7 +6,7 @@ import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
 
 export async function initLinkedInContext(
   proxy?: string
-): Promise<{ browser: Browser; context: BrowserContext }> {
+): Promise<{ browser: Browser; page: Page }> {
   const pptr = addExtra(Puppeteer);
   pptr.use(StealthPlugin());
 
@@ -42,11 +42,7 @@ export async function initLinkedInContext(
   };
 
   const browser = await pptr.launch(launchOptions);
-  const context =
-    (browser as any).createBrowserContext?.() ||
-    (browser as any).createIncognitoBrowserContext?.();
-
-  const page = await context.newPage();
+  const page = await browser.newPage();
   
   // Set user agent to look more like a real browser
   await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
@@ -64,5 +60,5 @@ export async function initLinkedInContext(
     throw new Error('LinkedIn authentication failed - cookies may be invalid or expired');
   }
 
-  return { browser, context };
+  return { browser, page };
 }

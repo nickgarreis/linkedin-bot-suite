@@ -15,10 +15,9 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
   // Update job status to processing
   await webhookService.updateJobStatus(jobId, 'processing');
 
-  const { browser, context } = await initLinkedInContext(process.env.PROXY_URL ?? '');
+  const { browser, page } = await initLinkedInContext(process.env.PROXY_URL ?? '');
   
   try {
-    const page = await context.newPage();
     let result: any;
 
     switch (jobData.type) {
