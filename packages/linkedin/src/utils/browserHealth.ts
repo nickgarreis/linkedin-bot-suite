@@ -1,5 +1,44 @@
 import { Page, Browser } from 'puppeteer';
 
+/**
+ * Safe page evaluation that handles frame detachment
+ */
+export async function safeEvaluate<T>(
+  page: Page, 
+  pageFunction: () => T, 
+  timeoutMs: number = 5000
+): Promise<T | {}> {
+  try {
+    // Check if page is closed first
+    if (page.isClosed()) {
+      console.error('Cannot evaluate: page is closed');
+      return {} as T;
+    }
+
+    // Check browser connection
+    if (!page.browser().isConnected()) {
+      console.error('Cannot evaluate: browser disconnected');
+      return {} as T;
+    }
+
+    return await Promise.race([
+      page.evaluate(pageFunction),
+      new Promise<T>((_, reject) => 
+        setTimeout(() => reject(new Error('Safe evaluation timeout')), timeoutMs)
+      )
+    ]);
+  } catch (error: any) {
+    if (error.message.includes('detached Frame') || 
+        error.message.includes('Session closed') ||
+        error.message.includes('Connection closed') ||
+        error.message.includes('Target closed')) {
+      console.error('Safe evaluation failed due to detached frame:', error.message);
+      return {} as T;
+    }
+    throw error;
+  }
+}
+
 export interface BrowserHealthCheck {
   isHealthy: boolean;
   url: string;
@@ -46,18 +85,30 @@ export async function checkPageHealth(
       return result;
     }
 
-    // Try to evaluate simple JavaScript with timeout
-    const pageInfo = await Promise.race([
-      page.evaluate(() => ({
-        url: window.location.href,
-        title: document.title,
-        readyState: document.readyState,
-        hasBody: !!document.body
-      })),
-      new Promise<null>((_, reject) => 
-        setTimeout(() => reject(new Error('Page evaluation timeout')), timeoutMs)
-      )
-    ]);
+    // Try to evaluate simple JavaScript with timeout and frame detachment protection
+    let pageInfo;
+    try {
+      pageInfo = await Promise.race([
+        page.evaluate(() => ({
+          url: window.location.href,
+          title: document.title,
+          readyState: document.readyState,
+          hasBody: !!document.body
+        })),
+        new Promise<null>((_, reject) => 
+          setTimeout(() => reject(new Error('Page evaluation timeout')), timeoutMs)
+        )
+      ]);
+    } catch (evalError: any) {
+      // Handle common frame detachment errors
+      if (evalError.message.includes('detached Frame') || 
+          evalError.message.includes('Session closed') ||
+          evalError.message.includes('Connection closed')) {
+        result.error = `Frame detached during evaluation: ${evalError.message}`;
+        return result;
+      }
+      throw evalError;
+    }
 
     if (!pageInfo) {
       result.error = 'Page evaluation failed';
@@ -195,6 +246,89 @@ export async function safeNavigate(
     console.error('Safe navigation failed:', error);
     return false;
   }
+}
+
+/**
+ * Error categorization for better recovery strategies
+ */
+export interface ErrorCategory {
+  type: 'browser_crash' | 'frame_detached' | 'connection_lost' | 'navigation_failed' | 'authentication_failed' | 'unknown';
+  recoverable: boolean;
+  retryable: boolean;
+  description: string;
+}
+
+export function categorizeError(error: Error): ErrorCategory {
+  const message = error.message.toLowerCase();
+  
+  // Browser process crashes
+  if (message.includes('session closed') || 
+      message.includes('connection closed') ||
+      message.includes('target closed') ||
+      message.includes('protocol error')) {
+    return {
+      type: 'browser_crash',
+      recoverable: true,
+      retryable: true,
+      description: 'Browser process crashed or connection lost'
+    };
+  }
+  
+  // Frame detachment issues
+  if (message.includes('detached frame') || 
+      message.includes('frame') && message.includes('detached')) {
+    return {
+      type: 'frame_detached',
+      recoverable: true,
+      retryable: true,
+      description: 'Page frame became detached during operation'
+    };
+  }
+  
+  // Connection issues
+  if (message.includes('connection') || 
+      message.includes('timeout') ||
+      message.includes('network')) {
+    return {
+      type: 'connection_lost',
+      recoverable: true,
+      retryable: true,
+      description: 'Network or connection issues'
+    };
+  }
+  
+  // Navigation failures
+  if (message.includes('navigation') || 
+      message.includes('about:blank') ||
+      message.includes('redirect')) {
+    return {
+      type: 'navigation_failed',
+      recoverable: true,
+      retryable: false,
+      description: 'Page navigation or redirect issues'
+    };
+  }
+  
+  // Authentication failures
+  if (message.includes('authentication') || 
+      message.includes('login') ||
+      message.includes('cookies') ||
+      message.includes('authwall')) {
+    return {
+      type: 'authentication_failed',
+      recoverable: false,
+      retryable: false,
+      description: 'LinkedIn authentication or session issues'
+    };
+  }
+  
+  // Unknown errors
+  return {
+    type: 'unknown',
+    recoverable: false,
+    retryable: false,
+    description: 'Unknown error type'
+  };
 }
 
 /**

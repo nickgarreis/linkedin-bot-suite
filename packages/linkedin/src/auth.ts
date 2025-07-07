@@ -3,7 +3,7 @@ import Puppeteer from 'puppeteer';
 import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
-import { checkPageHealth, checkBrowserHealth, waitForPageHealth, cleanupUserDataDir } from './utils/browserHealth';
+import { checkPageHealth, checkBrowserHealth, waitForPageHealth, cleanupUserDataDir, safeEvaluate } from './utils/browserHealth';
 
 export async function initLinkedInContext(
   proxy?: string
@@ -38,12 +38,28 @@ export async function initLinkedInContext(
       '--disable-crash-reporter',
       '--disable-gpu-sandbox',
       '--disable-software-rasterizer',
-      // Additional stability flags
+      // Additional stability flags for containers
       '--single-process',
       '--no-zygote',
       '--disable-extensions',
       '--disable-plugins',
       '--js-flags=--max-old-space-size=512',
+      // Memory and resource management
+      '--max_old_space_size=512',
+      '--disable-ipc-flooding-protection',
+      '--disable-hang-monitor',
+      '--disable-prompt-on-repost',
+      '--disable-client-side-phishing-detection',
+      '--disable-sync',
+      '--disable-translate',
+      '--disable-logging',
+      '--disable-notifications',
+      '--disable-desktop-notifications',
+      // Container-specific stability
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      '--shm-size=1gb',
+      '--disable-features=VizDisplayCompositor,AudioServiceOutOfProcess',
       ...(proxy ? [`--proxy-server=${proxy}`] : [])
     ]
   };
@@ -133,9 +149,25 @@ export async function initLinkedInContext(
     currentUrl = page.url();
     console.log('Stage 1 complete. Current URL:', currentUrl);
     
-    // Check for immediate redirect to login
+    // Check for immediate redirect to login (but allow /hp homepage)
     if (currentUrl.includes('/login') || currentUrl.includes('/authwall')) {
       throw new Error('LinkedIn authentication failed - redirected to login page immediately. Cookies may be invalid or expired.');
+    }
+    
+    // Handle LinkedIn homepage redirect (common in some regions)
+    if (currentUrl.includes('/hp')) {
+      console.log('Redirected to LinkedIn homepage (/hp), attempting to navigate to feed...');
+      try {
+        await page.goto('https://www.linkedin.com/feed', { 
+          waitUntil: 'domcontentloaded',
+          timeout: 30000 
+        });
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        currentUrl = page.url();
+        console.log('Successfully navigated from /hp to feed. Current URL:', currentUrl);
+      } catch (hpNavError) {
+        console.log('Failed to navigate from /hp to feed, but /hp indicates authentication success');
+      }
     }
     
     // Stage 2: Navigate to feed
@@ -171,34 +203,28 @@ export async function initLinkedInContext(
     currentUrl = page.url();
     console.log('Navigation error. Current URL:', currentUrl);
     
-    // Take screenshot for debugging
-    try {
-      const screenshotPath = `/tmp/linkedin-auth-error-${Date.now()}.png` as const;
-      await page.screenshot({ path: screenshotPath, fullPage: true });
-      console.log(`Screenshot saved to: ${screenshotPath}`);
-    } catch (screenshotError) {
-      console.error('Failed to take screenshot:', screenshotError);
-    }
+    // Skip screenshot in production to prevent crashes
+    console.log('Navigation error occurred, skipping screenshot to prevent session close');
     
-    // Enhanced error analysis
-    const errorAnalysis = await page.evaluate(() => {
+    // Enhanced error analysis with safe evaluation
+    const errorAnalysis = await safeEvaluate(page, () => {
       return {
         title: document.title,
         hasLoginForm: !!document.querySelector('form[action*="login"]'),
         hasAuthWall: !!document.querySelector('.authwall'),
         hasChallenge: !!document.querySelector('.challenge'),
         hasError: !!document.querySelector('.error-message'),
-        bodyClasses: document.body.className,
+        bodyClasses: document.body?.className || '',
         currentPath: window.location.pathname,
         hasRedirectMeta: !!document.querySelector('meta[http-equiv="refresh"]'),
-        pageText: document.body.innerText.substring(0, 500)
+        pageText: document.body?.innerText?.substring(0, 500) || ''
       };
-    });
+    }) as any;
     
     console.log('Error analysis:', errorAnalysis);
     
     // Check if we ended up on login page
-    if (currentUrl.includes('/login') || currentUrl.includes('/authwall') || errorAnalysis.hasLoginForm || errorAnalysis.hasAuthWall) {
+    if (currentUrl.includes('/login') || currentUrl.includes('/authwall') || errorAnalysis?.hasLoginForm || errorAnalysis?.hasAuthWall) {
       throw new Error(`LinkedIn authentication failed - redirected to login page. Cookies may be invalid or expired. Page analysis: ${JSON.stringify(errorAnalysis)}`);
     }
     
@@ -208,7 +234,7 @@ export async function initLinkedInContext(
     }
     
     // Check for security challenges or verification
-    if (errorAnalysis.hasChallenge || currentUrl.includes('/challenge')) {
+    if (errorAnalysis?.hasChallenge || currentUrl.includes('/challenge')) {
       throw new Error(`LinkedIn security challenge detected. Manual verification may be required. Page analysis: ${JSON.stringify(errorAnalysis)}`);
     }
     
@@ -221,14 +247,8 @@ export async function initLinkedInContext(
       });
       await new Promise(resolve => setTimeout(resolve, 3000));
     } catch (fallbackError) {
-      // Take final screenshot before failing
-      try {
-        const finalScreenshotPath = `/tmp/linkedin-final-error-${Date.now()}.png` as const;
-        await page.screenshot({ path: finalScreenshotPath, fullPage: true });
-        console.log(`Final screenshot saved to: ${finalScreenshotPath}`);
-      } catch (finalScreenshotError) {
-        console.error('Failed to take final screenshot:', finalScreenshotError);
-      }
+      // Skip final screenshot to prevent crashes
+      console.log('Fallback navigation also failed, skipping screenshot to prevent session close');
       
       throw new Error(`Navigation failed completely. Original error: ${error instanceof Error ? error.message : 'Unknown error'}. Fallback error: ${fallbackError instanceof Error ? fallbackError.message : 'Unknown fallback error'}. Page analysis: ${JSON.stringify(errorAnalysis)}`);
     }
@@ -238,12 +258,13 @@ export async function initLinkedInContext(
   currentUrl = page.url();
   console.log('Final URL after navigation:', currentUrl);
 
+  // Accept /hp as valid authenticated state, but prefer /feed
   if (currentUrl.includes('/login') || currentUrl.includes('/authwall')) {
     throw new Error('LinkedIn authentication failed - redirected to login page. Cookies may be invalid or expired.');
   }
 
-  // Enhanced login verification with multiple checkpoints
-  const loginCheckpoints = await page.evaluate(() => {
+  // Enhanced login verification with multiple checkpoints including /hp page using safe evaluation
+  const loginCheckpoints = await safeEvaluate(page, () => {
     const checkpoints = {
       globalNav: !!document.querySelector('nav.global-nav'),
       testGlobalNav: !!document.querySelector('[data-test-global-nav]'),
@@ -251,39 +272,39 @@ export async function initLinkedInContext(
       globalNavMe: !!document.querySelector('.global-nav__me'),
       profileNav: !!document.querySelector('.global-nav__me-content'),
       feedContainer: !!document.querySelector('.feed-container-theme'),
-      hasLinkedInClass: document.body.classList.contains('linkedin')
+      hasLinkedInClass: document.body?.classList.contains('linkedin') || false,
+      // Additional checks for /hp homepage
+      isHomepage: window.location.pathname === '/hp',
+      hasLinkedInLogo: !!document.querySelector('.linkedin-logo'),
+      hasMainContent: !!document.querySelector('main'),
+      noLoginForm: !document.querySelector('form[action*="login"]'),
+      noAuthWall: !document.querySelector('.authwall')
     };
     
     console.log('Login checkpoints:', checkpoints);
     return checkpoints;
-  });
+  }) || {};
 
   const loggedIn = Object.values(loginCheckpoints).some(checkpoint => checkpoint);
   
   if (!loggedIn) {
     console.log('Login verification failed. Checkpoints:', loginCheckpoints);
     
-    // Take screenshot for debugging login verification failure
-    try {
-      const verificationScreenshotPath = `/tmp/linkedin-verification-failed-${Date.now()}.png` as const;
-      await page.screenshot({ path: verificationScreenshotPath, fullPage: true });
-      console.log(`Verification failure screenshot saved to: ${verificationScreenshotPath}`);
-    } catch (screenshotError) {
-      console.error('Failed to take verification screenshot:', screenshotError);
-    }
+    // Skip verification screenshot to prevent crashes
+    console.log('Login verification failed, skipping screenshot to prevent session close');
     
-    // Additional page analysis for verification failure
-    const verificationAnalysis = await page.evaluate(() => {
+    // Additional page analysis for verification failure using safe evaluation
+    const verificationAnalysis = await safeEvaluate(page, () => {
       return {
         title: document.title,
         url: window.location.href,
         hasLinkedInBranding: !!document.querySelector('.linkedin-logo'),
         hasHeader: !!document.querySelector('header'),
         hasMain: !!document.querySelector('main'),
-        bodyClasses: document.body.className,
-        pageText: document.body.innerText.substring(0, 300)
+        bodyClasses: document.body?.className || '',
+        pageText: document.body?.innerText?.substring(0, 300) || ''
       };
-    });
+    }) || {};
     
     console.log('Verification analysis:', verificationAnalysis);
     
@@ -309,20 +330,36 @@ export async function initLinkedInContext(
   } catch (error) {
     console.error('Failed to launch browser:', error);
     
-    // Clean up resources on error
-    if (page && !page.isClosed()) {
+    // Clean up resources on error with connection safety
+    if (page) {
       try {
-        await page.close();
+        if (!page.isClosed() && page.browser().isConnected()) {
+          await page.close();
+        }
       } catch (e) {
-        console.error('Failed to close page:', e);
+        console.error('Failed to close page safely:', e);
       }
     }
     
     if (browser) {
       try {
-        await browser.close();
+        if (browser.isConnected()) {
+          await Promise.race([
+            browser.close(),
+            new Promise(resolve => setTimeout(resolve, 3000)) // 3s timeout
+          ]);
+        }
       } catch (e) {
-        console.error('Failed to close browser:', e);
+        console.error('Failed to close browser safely:', e);
+        // Force kill if graceful close fails
+        try {
+          const process = browser.process();
+          if (process) {
+            process.kill('SIGKILL');
+          }
+        } catch (killError) {
+          console.error('Failed to force kill browser:', killError);
+        }
       }
     }
     

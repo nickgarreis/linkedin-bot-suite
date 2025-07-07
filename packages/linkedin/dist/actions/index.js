@@ -1,9 +1,17 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.viewProfile = exports.sendMessage = exports.sendInvitation = void 0;
+exports.categorizeError = exports.safeEvaluate = exports.cleanupUserDataDir = exports.safeNavigate = exports.waitForPageHealth = exports.checkBrowserHealth = exports.checkPageHealth = exports.viewProfile = exports.sendMessage = exports.sendInvitation = void 0;
 var invite_1 = require("./invite");
 Object.defineProperty(exports, "sendInvitation", { enumerable: true, get: function () { return invite_1.sendInvitation; } });
 var message_1 = require("./message");
 Object.defineProperty(exports, "sendMessage", { enumerable: true, get: function () { return message_1.sendMessage; } });
 var profile_1 = require("./profile");
 Object.defineProperty(exports, "viewProfile", { enumerable: true, get: function () { return profile_1.viewProfile; } });
+var browserHealth_1 = require("../utils/browserHealth");
+Object.defineProperty(exports, "checkPageHealth", { enumerable: true, get: function () { return browserHealth_1.checkPageHealth; } });
+Object.defineProperty(exports, "checkBrowserHealth", { enumerable: true, get: function () { return browserHealth_1.checkBrowserHealth; } });
+Object.defineProperty(exports, "waitForPageHealth", { enumerable: true, get: function () { return browserHealth_1.waitForPageHealth; } });
+Object.defineProperty(exports, "safeNavigate", { enumerable: true, get: function () { return browserHealth_1.safeNavigate; } });
+Object.defineProperty(exports, "cleanupUserDataDir", { enumerable: true, get: function () { return browserHealth_1.cleanupUserDataDir; } });
+Object.defineProperty(exports, "safeEvaluate", { enumerable: true, get: function () { return browserHealth_1.safeEvaluate; } });
+Object.defineProperty(exports, "categorizeError", { enumerable: true, get: function () { return browserHealth_1.categorizeError; } });

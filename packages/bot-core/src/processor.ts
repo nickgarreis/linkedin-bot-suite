@@ -1,6 +1,6 @@
 import { Job } from 'bullmq';
 import { log } from './index';
-import { initLinkedInContext, sendInvitation, sendMessage, viewProfile, checkPageHealth, checkBrowserHealth, cleanupUserDataDir } from '@linkedin-bot-suite/linkedin';
+import { initLinkedInContext, sendInvitation, sendMessage, viewProfile, checkPageHealth, checkBrowserHealth, cleanupUserDataDir, categorizeError } from '@linkedin-bot-suite/linkedin';
 import { LinkedInJob, JOB_TYPES } from '@linkedin-bot-suite/shared';
 import { WebhookService } from './services/webhookService';
 import { Browser, Page } from 'puppeteer';
@@ -120,37 +120,43 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
       heartbeat = null;
     }
     
-    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    const error = err instanceof Error ? err : new Error('Unknown error');
+    const errorCategory = categorizeError(error);
     
-    // Check for authentication errors
-    if (errorMessage.includes('authentication failed') || 
-        errorMessage.includes('ERR_TOO_MANY_REDIRECTS') ||
-        errorMessage.includes('redirected to login page') ||
-        errorMessage.includes('cookies may be invalid')) {
-      log.error({ jobId, error: errorMessage }, 'Authentication error - cookies may be expired');
-      // Don't retry auth errors
-      await webhookService.processJobCompletion(jobId, false, null, 'Authentication failed - please update LinkedIn cookies');
-      return; // Don't re-throw, no point retrying with bad cookies
+    log.error({ 
+      jobId, 
+      type: jobData.type, 
+      profileUrl: jobData.profileUrl, 
+      errorType: errorCategory.type,
+      recoverable: errorCategory.recoverable,
+      retryable: errorCategory.retryable,
+      error: error.message
+    }, `Job failed: ${errorCategory.description}`);
+    
+    // Handle different error types
+    switch (errorCategory.type) {
+      case 'authentication_failed':
+        await webhookService.processJobCompletion(jobId, false, null, 'Authentication failed - please update LinkedIn cookies');
+        return; // Don't re-throw, no point retrying with bad cookies
+        
+      case 'browser_crash':
+      case 'frame_detached':
+      case 'connection_lost':
+        await webhookService.processJobCompletion(jobId, false, null, `Browser error (${errorCategory.type}): ${error.message}`);
+        break;
+        
+      case 'navigation_failed':
+        await webhookService.processJobCompletion(jobId, false, null, `Navigation error: ${error.message}`);
+        break;
+        
+      default:
+        await webhookService.processJobCompletion(jobId, false, null, error.message);
     }
     
-    // Check for browser-specific errors
-    if (errorMessage.includes('Browser') || 
-        errorMessage.includes('Page') || 
-        errorMessage.includes('about:blank') ||
-        errorMessage.includes('Not attached to an active page')) {
-      log.error({ jobId, error: errorMessage }, 'Browser stability error');
-      await webhookService.processJobCompletion(jobId, false, null, `Browser error: ${errorMessage}`);
-    } else {
-      log.error(
-        { jobId, type: jobData.type, profileUrl: jobData.profileUrl, err },
-        'Job failed'
-      );
-
-      // Process job failure
-      await webhookService.processJobCompletion(jobId, false, null, errorMessage);
+    // Only re-throw if error is retryable (let BullMQ handle retries)
+    if (errorCategory.retryable) {
+      throw err;
     }
-    
-    throw err; // Re-throw to let BullMQ handle retries
     
   } finally {
     // Clean up resources with proper error handling

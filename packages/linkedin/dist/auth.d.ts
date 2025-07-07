@@ -1,5 +1,6 @@
-import { Browser, BrowserContext } from 'puppeteer';
+import { Browser, Page } from 'puppeteer';
 export declare function initLinkedInContext(proxy?: string): Promise<{
     browser: Browser;
-    context: BrowserContext;
+    page: Page;
+    userDataDir: string;
 }>;

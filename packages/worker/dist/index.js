@@ -11,10 +11,12 @@ console.log(`Queue: ${queueName}`);
 console.log(`Concurrency: ${concurrency}`);
 const worker = new bullmq_1.Worker(queueName, bot_core_1.processJob, {
     connection: { url: process.env.REDIS_URL },
-    concurrency,
+    concurrency: 1, // Reduced concurrency for stability
     prefix: process.env.BULLMQ_PREFIX || 'bull',
     removeOnComplete: { count: 100 },
     removeOnFail: { count: 50 },
+    stalledInterval: 30000, // Check for stalled jobs every 30s
+    maxStalledCount: 1, // Retry stalled jobs only once
 });
 worker.on('ready', () => {
     console.log('Worker is ready and waiting for jobs');

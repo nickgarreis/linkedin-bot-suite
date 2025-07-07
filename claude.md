@@ -38,10 +38,11 @@ This is a LinkedIn bot suite built as a monorepo using pnpm workspaces. The proj
 - `src/actions/invite.ts` - Connection invitation automation
 - `src/actions/message.ts` - Direct messaging automation
 - `src/actions/profile.ts` - Profile viewing automation
-- `src/auth.ts` - Browser context initialization with stealth plugin
+- `src/auth.ts` - Browser context initialization with stealth plugin and health checks
+- `src/utils/browserHealth.ts` - Browser stability and health validation utilities
 
 **Core System (packages/bot-core/)**
-- `processor.ts` - Multi-action job processor with webhook callbacks
+- `processor.ts` - Multi-action job processor with browser health checks and enhanced cleanup
 - `services/webhookService.ts` - Webhook notifications and job completion handling
 
 ### Technology Stack
@@ -60,8 +61,11 @@ This is a LinkedIn bot suite built as a monorepo using pnpm workspaces. The proj
 # Build all packages using TypeScript composite builds
 pnpm run build
 
-# Clean build artifacts
+# Clean build artifacts (removes stale .d.ts files)
 pnpm run build:clean
+
+# Clean build (recommended after interface changes)
+pnpm run build:clean && pnpm run build
 
 # Build specific packages (legacy commands)
 pnpm run build:shared
@@ -176,16 +180,30 @@ x-api-key: your-api-key-here
 ## Deployment
 
 ### Render.com Deployment
-Use configurations in `deployments/render/`:
-- `api-server/render.yaml` - API server with Redis
-- `worker/render.yaml` - Background worker
-- Dockerfiles for containerized deployments
+- **API Server**: Node.js web service using `api-server/render.yaml`
+- **Worker**: Docker background service using root `Dockerfile`
+- **Redis**: Managed Redis service linked to both API and Worker
+
+### Docker Configuration
+**Worker Service Requirements:**
+- Environment: Docker (not Node.js)
+- Dockerfile: Root-level `Dockerfile` with dumb-init for signal handling
+- Base Image: `node:18-slim` (Debian-based)
+- Chrome Installation: Google Chrome Stable via apt-get with stability packages
+- User Management: Creates `nodejs` user with proper home directory
+- Build Process: Runs `build:clean && build` to prevent stale TypeScript declarations
 
 ### Required Services
-1. **API Server** - Web service for n8n integration
-2. **Worker** - Background service for job processing
+1. **API Server** - Node.js web service for n8n integration
+2. **Worker** - Docker background service for job processing
 3. **Redis** - Queue and caching (managed by Render)
 4. **Supabase** - Database and authentication (external)
+
+### Docker Environment Variables
+Additional environment variables for Docker Worker:
+- `PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true`
+- `PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable`
+- `CHROME_USER_DATA_DIR=/tmp/chrome-user-data`
 
 ## Build System & TypeScript Configuration
 
@@ -199,6 +217,14 @@ Use configurations in `deployments/render/`:
 - **Lockfile out of sync**: Run `rm pnpm-lock.yaml && pnpm install`
 - **Build errors**: Ensure dependencies are built first with `pnpm run build`
 - **Type errors**: Check that all workspace packages are properly referenced in tsconfig.json
+- **Docker Chrome issues**: Ensure Worker service uses Docker environment, not Node.js
+- **Render deployment path errors**: Use root-level `Dockerfile` for Worker service
+- **Stale TypeScript declarations**: Run `pnpm run build:clean && pnpm run build` to regenerate .d.ts files
+- **Cross-package type mismatches**: Ensure all packages are rebuilt after interface changes
+- **Chrome permission denied**: Ensure proper home directory creation with `/home/nodejs/.local/share/applications`
+- **Chrome SingletonLock error**: Fixed by using unique user data directories per job instance
+- **Browser "about:blank" errors**: Resolved with comprehensive health checks and proper cleanup
+- **Page "Not attached" errors**: Fixed with browser disconnect handlers and timeout-based cleanup
 
 ## LinkedIn Automation Notes
 
@@ -210,3 +236,13 @@ Use configurations in `deployments/render/`:
 - Respects rate limits and daily invitation quotas
 - Provides detailed error reporting and retry logic
 - Uses Promise-based delays instead of deprecated `page.waitForTimeout()`
+
+### Puppeteer Configuration
+- **Chrome Binary**: Uses Google Chrome Stable in Docker containers with dumb-init
+- **Launch Arguments**: Optimized for containerized environments with stability flags (--single-process, --no-zygote)
+- **Browser Management**: Enhanced browser lifecycle with health checks and proper cleanup
+- **Data Directories**: Uses unique `/tmp/chrome-user-data-{timestamp}-{random}` per job instance with automatic cleanup
+- **User Permissions**: Runs as `nodejs` user with proper home directory setup
+- **Concurrent Jobs**: Prevents SingletonLock errors by using unique user data directories
+- **Health Monitoring**: Comprehensive browser and page health validation
+- **Error Recovery**: Browser disconnect handlers and timeout-based cleanup mechanisms
