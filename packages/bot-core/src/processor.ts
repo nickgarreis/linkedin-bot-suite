@@ -15,6 +15,12 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
   // Update job status to processing
   await webhookService.updateJobStatus(jobId, 'processing');
 
+  // Add heartbeat interval to prevent job stalling
+  const heartbeat = setInterval(() => {
+    job.updateProgress(50); // Keep job alive
+    console.log(`Heartbeat for job ${jobId}`);
+  }, 10000); // Every 10 seconds
+
   const { browser, page } = await initLinkedInContext(process.env.PROXY_URL ?? '');
   
   try {
@@ -37,6 +43,8 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
         throw new Error(`Unknown job type: ${(jobData as any).type}`);
     }
 
+    clearInterval(heartbeat);
+    
     log.info(
       { jobId, type: jobData.type, profileUrl: jobData.profileUrl },
       'Job completed successfully'
@@ -45,6 +53,8 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
     // Process job completion
     await webhookService.processJobCompletion(jobId, true, result);
   } catch (err) {
+    clearInterval(heartbeat);
+    
     const errorMessage = err instanceof Error ? err.message : 'Unknown error';
     
     log.error(
