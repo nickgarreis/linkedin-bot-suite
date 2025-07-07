@@ -12,7 +12,7 @@ export async function initLinkedInContext(
 
   const launchOptions: any = {
     headless: 'new',
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
