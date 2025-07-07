@@ -1,39 +1,33 @@
 import { Browser, BrowserContext } from 'puppeteer';
-import puppeteerCore from 'puppeteer';
+import Puppeteer from 'puppeteer';
 import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import fs from 'fs/promises';
 
 export async function initLinkedInContext(
-  cookiesPath: string,
   proxy?: string
 ): Promise<{ browser: Browser; context: BrowserContext }> {
-  const puppeteer = addExtra(puppeteerCore);
-  puppeteer.use(StealthPlugin());
+  const pptr = addExtra(Puppeteer);
+  pptr.use(StealthPlugin());
 
-const launch: any = {
-  headless: true,
-  args: [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
-    ...(proxy ? [`--proxy-server=${proxy}`] : [])
-  ]
-};
+  const launchOptions: any = {
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      ...(proxy ? [`--proxy-server=${proxy}`] : [])
+    ]
+  };
 
-  const browser = await puppeteer.launch(launch);
+  const browser = await pptr.launch(launchOptions);
   const context =
-    (await (browser as any).createBrowserContext?.()) ||
-    (await (browser as any).createIncognitoBrowserContext?.());
+    (browser as any).createBrowserContext?.() ||
+    (browser as any).createIncognitoBrowserContext?.();
 
   const page = await context.newPage();
-
-  // Cookies laden
-  const cookiesJSON = await fs.readFile(cookiesPath, 'utf-8');
-  const cookies = JSON.parse(cookiesJSON);
+  const cookies = JSON.parse(process.env.LINKEDIN_COOKIES_JSON!);
   await page.setCookie(...cookies);
 
-  // Login-Prüfung
   await page.goto('https://www.linkedin.com/feed', { waitUntil: 'networkidle0' });
   const loggedIn = (await page.$('img.global-nav__me-photo')) !== null;
   if (!loggedIn) throw new Error('LinkedIn-Cookie ungültig oder abgelaufen');
