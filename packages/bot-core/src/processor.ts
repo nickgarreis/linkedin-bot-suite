@@ -57,6 +57,17 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
     
     const errorMessage = err instanceof Error ? err.message : 'Unknown error';
     
+    // Check for authentication errors
+    if (errorMessage.includes('authentication failed') || 
+        errorMessage.includes('ERR_TOO_MANY_REDIRECTS') ||
+        errorMessage.includes('redirected to login page') ||
+        errorMessage.includes('cookies may be invalid')) {
+      log.error({ jobId, error: errorMessage }, 'Authentication error - cookies may be expired');
+      // Don't retry auth errors
+      await webhookService.processJobCompletion(jobId, false, null, 'Authentication failed - please update LinkedIn cookies');
+      return; // Don't re-throw, no point retrying with bad cookies
+    }
+    
     log.error(
       { jobId, type: jobData.type, profileUrl: jobData.profileUrl, err },
       'Job failed'

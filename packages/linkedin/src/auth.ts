@@ -10,6 +10,8 @@ export async function initLinkedInContext(
   const pptr = addExtra(Puppeteer);
   pptr.use(StealthPlugin());
 
+  const userDataDir = `/tmp/chrome-user-data-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  
   const launchOptions: any = {
     headless: 'new',
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
@@ -18,26 +20,18 @@ export async function initLinkedInContext(
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-blink-features=AutomationControlled',
-      '--disable-extensions',
-      '--disable-plugins',
-      '--disable-images',
-      '--disable-javascript',
-      '--disable-css',
+      `--user-data-dir=${userDataDir}`,
+      '--window-size=1920,1080',
+      '--start-maximized',
+      '--disable-gpu',
+      '--disable-web-security',
+      '--disable-features=IsolateOrigins,site-per-process',
       '--no-first-run',
       '--no-default-browser-check',
-      '--disable-background-timer-throttling',
-      '--disable-backgrounding-occluded-windows',
-      '--disable-renderer-backgrounding',
-      '--disable-features=TranslateUI',
-      '--disable-ipc-flooding-protection',
-      '--single-process',
       // Memory optimization
       '--max_old_space_size=512',
       '--memory-pressure-off',
-      '--disable-gpu',
       '--disable-features=VizDisplayCompositor',
-      '--disable-web-security',
-      `--user-data-dir=/tmp/chrome-user-data-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       '--data-path=/tmp/chrome-data',
       '--homedir=/tmp',
       '--disable-crash-reporter',
@@ -62,14 +56,48 @@ export async function initLinkedInContext(
   const cookies = JSON.parse(process.env.LINKEDIN_COOKIES_JSON!);
   await page.setCookie(...cookies);
 
-  // Navigate to LinkedIn and verify login
-  await page.goto('https://www.linkedin.com/feed', { waitUntil: 'networkidle0' });
-  
-  // Check if user is logged in
-  const loggedIn = (await page.$(LINKEDIN_SELECTORS.PROFILE_PHOTO)) !== null;
-  if (!loggedIn) {
-    throw new Error('LinkedIn authentication failed - cookies may be invalid or expired');
+  // Navigate to LinkedIn and verify login with redirect handling
+  try {
+    console.log('Navigating to LinkedIn feed...');
+    await page.goto('https://www.linkedin.com/feed', { 
+      waitUntil: 'networkidle0',
+      timeout: 30000 
+    });
+  } catch (error) {
+    // Try going to the home page instead
+    console.log('Feed redirect failed, trying home page...');
+    await page.goto('https://www.linkedin.com/', { 
+      waitUntil: 'networkidle0',
+      timeout: 30000 
+    });
   }
+
+  // Wait a bit for any redirects to settle
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  // Check current URL to see if we were redirected to login
+  const currentUrl = page.url();
+  console.log('Current URL after navigation:', currentUrl);
+
+  if (currentUrl.includes('/login') || currentUrl.includes('/authwall')) {
+    throw new Error('LinkedIn authentication failed - redirected to login page. Cookies may be invalid or expired.');
+  }
+
+  // Alternative login check - look for navigation elements
+  const loggedIn = await page.evaluate(() => {
+    return !!(
+      document.querySelector('nav.global-nav') || 
+      document.querySelector('[data-test-global-nav]') ||
+      document.querySelector('.feed-identity-module') ||
+      document.querySelector('.global-nav__me')
+    );
+  });
+
+  if (!loggedIn) {
+    throw new Error('LinkedIn authentication failed - unable to verify login status');
+  }
+
+  console.log('Successfully authenticated with LinkedIn');
 
     return { browser, page };
   } catch (error) {
