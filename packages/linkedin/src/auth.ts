@@ -31,6 +31,12 @@ export async function initLinkedInContext(
       '--disable-features=TranslateUI',
       '--disable-ipc-flooding-protection',
       '--single-process',
+      '--user-data-dir=/tmp/chrome-user-data',
+      '--data-path=/tmp/chrome-data',
+      '--homedir=/tmp',
+      '--disable-crash-reporter',
+      '--disable-gpu-sandbox',
+      '--disable-software-rasterizer',
       ...(proxy ? [`--proxy-server=${proxy}`] : [])
     ]
   };

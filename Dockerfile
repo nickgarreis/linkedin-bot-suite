@@ -35,7 +35,9 @@ RUN apt-get update && apt-get install -y \
 
 # Tell Puppeteer to skip installing Chromium. We'll be using Google Chrome.
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable \
+    CHROME_DEVEL_SANDBOX=/usr/bin/google-chrome-stable \
+    CHROME_USER_DATA_DIR=/tmp/chrome-user-data
 
 # Create app directory
 WORKDIR /app
@@ -62,7 +64,11 @@ RUN /usr/bin/google-chrome-stable --version
 
 # Create a non-root user to run the application
 RUN groupadd -g 1001 nodejs
-RUN useradd -r -u 1001 -g nodejs nodejs
+RUN useradd -r -u 1001 -g nodejs -m -d /home/nodejs nodejs
+
+# Create Chrome directories and set permissions
+RUN mkdir -p /tmp/chrome-user-data /tmp/chrome-data && \
+    chown -R nodejs:nodejs /tmp/chrome-user-data /tmp/chrome-data
 
 # Change to nodejs user
 USER nodejs
