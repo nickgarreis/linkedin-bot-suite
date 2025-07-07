@@ -39,6 +39,56 @@ export async function safeEvaluate<T>(
   }
 }
 
+/**
+ * Safe storage clearing that handles SecurityError gracefully
+ */
+export async function safeClearStorage(page: Page): Promise<boolean> {
+  try {
+    // Check if page is closed first
+    if (page.isClosed()) {
+      console.warn('Cannot clear storage: page is closed');
+      return false;
+    }
+
+    // Check browser connection
+    if (!page.browser().isConnected()) {
+      console.warn('Cannot clear storage: browser disconnected');
+      return false;
+    }
+
+    await safeEvaluate(page, () => {
+      try {
+        // Clear localStorage if available
+        if (typeof localStorage !== 'undefined') {
+          localStorage.clear();
+        }
+        // Clear sessionStorage if available  
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.clear();
+        }
+      } catch (error: any) {
+        // Log but don't throw - storage clearing is not critical
+        console.warn('Storage clearing failed:', error.message);
+      }
+    }, 3000);
+
+    console.log('Storage cleared successfully');
+    return true;
+  } catch (error: any) {
+    // Handle SecurityError and other storage-related errors gracefully
+    if (error.message.includes('SecurityError') || 
+        error.message.includes('localStorage') ||
+        error.message.includes('sessionStorage')) {
+      console.warn('Storage clearing blocked by browser security policy:', error.message);
+      return false;
+    }
+    
+    // Re-throw other unexpected errors
+    console.error('Unexpected error during storage clearing:', error.message);
+    return false;
+  }
+}
+
 export interface BrowserHealthCheck {
   isHealthy: boolean;
   url: string;

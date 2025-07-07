@@ -3,7 +3,7 @@ import Puppeteer from 'puppeteer';
 import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
-import { checkPageHealth, checkBrowserHealth, waitForPageHealth, cleanupUserDataDir, safeEvaluate } from './utils/browserHealth';
+import { checkPageHealth, checkBrowserHealth, waitForPageHealth, cleanupUserDataDir, safeEvaluate, safeClearStorage } from './utils/browserHealth';
 
 export async function initLinkedInContext(
   proxy?: string
@@ -38,6 +38,11 @@ export async function initLinkedInContext(
       '--disable-crash-reporter',
       '--disable-gpu-sandbox',
       '--disable-software-rasterizer',
+      // Storage and security fixes for localStorage access
+      '--allow-file-access-from-files',
+      '--disable-features=BlockInsecurePrivateNetworkRequests',
+      '--disable-background-mode',
+      '--allow-running-insecure-content',
       // Additional stability flags for containers
       '--single-process',
       '--no-zygote',
@@ -95,11 +100,11 @@ export async function initLinkedInContext(
     await page.setViewport({ width: 1920, height: 1080 });
     
     // Clear cache and storage before navigation to prevent redirect loops
-    await page.goto('about:blank');
-    await page.evaluate(() => {
-      localStorage.clear();
-      sessionStorage.clear();
-    });
+    // Use data URL instead of about:blank for better security context
+    await page.goto('data:text/html,<html><head><title>Initializing</title></head><body></body></html>');
+    
+    // Use safe storage clearing to handle SecurityError gracefully
+    await safeClearStorage(page);
     
     // Set user agent BEFORE navigating - updated to latest Chrome
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
