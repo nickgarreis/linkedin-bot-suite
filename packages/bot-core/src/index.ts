@@ -2,6 +2,8 @@ import { Queue, QueueEvents } from 'bullmq';
 import { createClient } from '@supabase/supabase-js';
 import pino from 'pino';
 
+log.info(`Worker listening on ${process.env.QUEUE_NAME}`);
+
 export const log = pino({ name: 'bot-core' });
 
 export function initSupabase() {
