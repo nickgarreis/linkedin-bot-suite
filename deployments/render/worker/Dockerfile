@@ -24,14 +24,13 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/bot-core/package.json ./packages/bot-core/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/linkedin/package.json ./packages/linkedin/
-COPY clients/acme-worker/package.json ./clients/acme-worker/
+COPY packages/worker/package.json ./packages/worker/
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile
 
 # Copy source code
 COPY packages/ ./packages/
-COPY clients/ ./clients/
 COPY tsconfig.json ./
 
 # Build all packages
@@ -45,4 +44,4 @@ RUN adduser -S nodejs -u 1001
 USER nodejs
 
 # Start the worker
-CMD ["pnpm", "--filter", "acme-worker", "start"]
+CMD ["pnpm", "--filter", "@linkedin-bot-suite/worker", "start"]

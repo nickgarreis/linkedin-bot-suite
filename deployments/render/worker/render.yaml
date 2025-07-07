@@ -1,10 +1,10 @@
 services:
   - type: background
     name: linkedin-bot-worker
-    env: node
+    env: docker
     plan: starter
-    buildCommand: pnpm install && pnpm run build:worker
-    startCommand: pnpm --filter @linkedin-bot-suite/worker start
+    dockerfilePath: ./deployments/render/worker/Dockerfile
+    dockerContext: .
     envVars:
       - key: NODE_ENV
         value: production
