@@ -3,10 +3,11 @@ import Puppeteer from 'puppeteer';
 import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
+import { checkPageHealth, checkBrowserHealth, waitForPageHealth, cleanupUserDataDir } from './utils/browserHealth';
 
 export async function initLinkedInContext(
   proxy?: string
-): Promise<{ browser: Browser; page: Page }> {
+): Promise<{ browser: Browser; page: Page; userDataDir: string }> {
   const pptr = addExtra(Puppeteer);
   pptr.use(StealthPlugin());
 
@@ -37,17 +38,42 @@ export async function initLinkedInContext(
       '--disable-crash-reporter',
       '--disable-gpu-sandbox',
       '--disable-software-rasterizer',
+      // Additional stability flags
+      '--single-process',
+      '--no-zygote',
+      '--disable-extensions',
+      '--disable-plugins',
+      '--js-flags=--max-old-space-size=512',
       ...(proxy ? [`--proxy-server=${proxy}`] : [])
     ]
   };
 
+  let browser: Browser | null = null;
+  let page: Page | null = null;
+
   try {
     console.log('Launching Chrome browser...');
-    const browser = await pptr.launch(launchOptions);
+    browser = await pptr.launch(launchOptions);
     console.log('Browser launched successfully');
     
-    const page = await browser.newPage();
+    // Initial browser health check
+    const browserHealthy = await checkBrowserHealth(browser);
+    if (!browserHealthy) {
+      throw new Error('Browser failed initial health check');
+    }
+    
+    // Get existing pages and close extras
+    const pages = await browser.pages();
+    for (let i = 1; i < pages.length; i++) {
+      await pages[i].close();
+    }
+    
+    page = pages[0] || await browser.newPage();
     console.log('Page created successfully');
+    
+    // Set default timeouts
+    page.setDefaultNavigationTimeout(60000);
+    page.setDefaultTimeout(30000);
     
     // Set viewport
     await page.setViewport({ width: 1920, height: 1080 });
@@ -68,9 +94,21 @@ export async function initLinkedInContext(
     const cookies = JSON.parse(process.env.LINKEDIN_COOKIES_JSON!);
     console.log(`Setting ${cookies.length} cookies...`);
     
+    // Validate essential cookies
+    const essentialCookies = ['li_at', 'JSESSIONID'];
+    for (const cookieName of essentialCookies) {
+      if (!cookies.find((c: any) => c.name === cookieName)) {
+        throw new Error(`Missing essential cookie: ${cookieName}`);
+      }
+    }
+    
     // Set cookies one by one to handle errors
     for (const cookie of cookies) {
       try {
+        // Remove expired cookies
+        if (cookie.expires && cookie.expires < Date.now() / 1000) {
+          delete cookie.expires;
+        }
         await page.setCookie(cookie);
       } catch (err) {
         console.error(`Failed to set cookie ${cookie.name}:`, err);
@@ -122,6 +160,12 @@ export async function initLinkedInContext(
     
     // Wait for any final redirects to settle
     await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Add health check after navigation
+    const navigationHealth = await checkPageHealth(page);
+    if (!navigationHealth.isHealthy) {
+      throw new Error(`Page health check failed after navigation: ${navigationHealth.error}`);
+    }
     
   } catch (error) {
     currentUrl = page.url();
@@ -249,9 +293,42 @@ export async function initLinkedInContext(
   console.log('Successfully authenticated with LinkedIn. Checkpoints passed:', 
     Object.entries(loginCheckpoints).filter(([_, passed]) => passed).map(([name]) => name).join(', '));
 
-    return { browser, page };
+    // Final health check before returning
+    const finalHealth = await checkPageHealth(page);
+    if (!finalHealth.isHealthy) {
+      throw new Error(`Final health check failed: ${finalHealth.error}`);
+    }
+
+    // Add browser disconnect handler
+    browser.on('disconnected', () => {
+      console.log('Browser disconnected, cleaning up user data directory');
+      cleanupUserDataDir(userDataDir);
+    });
+
+    return { browser, page, userDataDir };
   } catch (error) {
     console.error('Failed to launch browser:', error);
+    
+    // Clean up resources on error
+    if (page && !page.isClosed()) {
+      try {
+        await page.close();
+      } catch (e) {
+        console.error('Failed to close page:', e);
+      }
+    }
+    
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (e) {
+        console.error('Failed to close browser:', e);
+      }
+    }
+    
+    // Clean up user data directory
+    cleanupUserDataDir(userDataDir);
+    
     throw new Error(`Browser launch failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }

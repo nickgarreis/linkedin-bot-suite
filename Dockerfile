@@ -27,17 +27,31 @@ RUN apt-get update && apt-get install -y \
     xdg-utils \
     libxss1 \
     libgconf-2-4 \
+    # Additional stability packages
+    libglib2.0-0 \
+    libpangocairo-1.0-0 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libatspi2.0-0 \
+    libgtk-3-0 \
+    # Process management
+    dumb-init \
     && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
     && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
+# Create necessary directories with proper permissions
+RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
+
 # Tell Puppeteer to skip installing Chromium. We'll be using Google Chrome.
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable \
     CHROME_DEVEL_SANDBOX=/usr/bin/google-chrome-stable \
-    CHROME_USER_DATA_DIR=/tmp/chrome-user-data
+    CHROME_USER_DATA_DIR=/tmp/chrome-user-data \
+    DISPLAY=:99 \
+    DBUS_SESSION_BUS_ADDRESS=/dev/null
 
 # Create app directory
 WORKDIR /app
@@ -76,5 +90,6 @@ ENV HOME=/home/nodejs
 # Change to nodejs user
 USER nodejs
 
-# Start the worker
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
 CMD ["pnpm", "--filter", "@linkedin-bot-suite/worker", "start"]
