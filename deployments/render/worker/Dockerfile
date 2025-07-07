@@ -10,11 +10,17 @@ RUN npm install -g pnpm && \
     harfbuzz \
     ca-certificates \
     ttf-freefont \
-    curl
+    curl \
+    dbus \
+    xvfb \
+    mesa-gl \
+    udev \
+    ttf-liberation \
+    wqy-zenhei
 
 # Tell Puppeteer to skip installing Chromium. We'll be using the installed package.
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Create app directory
 WORKDIR /app
@@ -35,6 +41,9 @@ COPY tsconfig.json ./
 
 # Build all packages
 RUN pnpm run build
+
+# Verify Chrome binary exists and is executable
+RUN /usr/bin/chromium --version
 
 # Create a non-root user to run the application
 RUN addgroup -g 1001 -S nodejs

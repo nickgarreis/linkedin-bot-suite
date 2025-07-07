@@ -12,6 +12,7 @@ export async function initLinkedInContext(
 
   const launchOptions: any = {
     headless: 'new',
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -22,6 +23,14 @@ export async function initLinkedInContext(
       '--disable-images',
       '--disable-javascript',
       '--disable-css',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--disable-features=TranslateUI',
+      '--disable-ipc-flooding-protection',
+      '--single-process',
       ...(proxy ? [`--proxy-server=${proxy}`] : [])
     ]
   };
