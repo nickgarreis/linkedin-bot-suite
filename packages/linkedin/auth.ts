@@ -11,8 +11,15 @@ export async function initLinkedInContext(
   const puppeteer = addExtra(puppeteerCore);
   puppeteer.use(StealthPlugin());
 
-  const launch: any = { headless: false };
-  if (proxy) launch.args = [`--proxy-server=${proxy}`];
+const launch: any = {
+  headless: true,
+  args: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    ...(proxy ? [`--proxy-server=${proxy}`] : [])
+  ]
+};
 
   const browser = await puppeteer.launch(launch);
   const context =
