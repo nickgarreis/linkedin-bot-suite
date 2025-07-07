@@ -1,4 +1,5 @@
 import express from 'express';
+import fetch from 'node-fetch';
 
 const router: express.Router = express.Router();
 
@@ -27,7 +28,7 @@ function validateInternalKey(req: express.Request, res: express.Response, next: 
 // Cookie validation function
 async function validateCookies(cookies: any[]): Promise<boolean> {
   try {
-    const fetch = (await import('node-fetch')).default;
+    // Using the imported fetch function
     const liAt = cookies.find((c: any) => c.name === 'li_at')?.value;
     if (!liAt) return false;
 
@@ -84,7 +85,7 @@ router.post('/update-cookies', validateInternalKey, async (req, res) => {
 
     if (renderApiKey && renderServiceId) {
       try {
-        const fetch = (await import('node-fetch')).default;
+        // Using the imported fetch function
         
         // Update environment variable
         const updateResponse = await fetch(`https://api.render.com/v1/services/${renderServiceId}/env-vars`, {

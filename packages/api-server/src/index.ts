@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import cron from 'node-cron';
+import fetch from 'node-fetch';
 import { CONFIG, validateConfig } from './config';
 import { defaultRateLimit } from './middleware/rateLimiting';
 import webhooksRouter from './routes/webhooks';
@@ -81,7 +82,7 @@ async function validateCookiesHealth(): Promise<boolean> {
     const liAt = parsedCookies.find((c: any) => c.name === 'li_at')?.value;
     if (!liAt) return false;
 
-    const fetch = (await import('node-fetch')).default;
+    // Using the imported fetch function
     const resp = await fetch('https://www.linkedin.com/feed', {
       headers: { cookie: `li_at=${liAt}` },
       redirect: 'manual'

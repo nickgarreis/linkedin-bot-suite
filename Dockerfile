@@ -58,13 +58,11 @@ WORKDIR /app
 
 # Copy package files
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/api-server/package.json ./packages/api-server/
 COPY packages/bot-core/package.json ./packages/bot-core/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/linkedin/package.json ./packages/linkedin/
 COPY packages/worker/package.json ./packages/worker/
-
-# Verify workspace setup (optional debug - can be removed for production)
-RUN ls -la packages/*/package.json && cat pnpm-workspace.yaml
 
 # Install dependencies with robust error handling
 RUN pnpm install --frozen-lockfile || pnpm install
