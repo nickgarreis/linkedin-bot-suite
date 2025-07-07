@@ -10,7 +10,37 @@ export async function sendMessage(
 
   try {
     // Wait for page to load and find message button
-    const [messageButton] = await (page as any).$x(LINKEDIN_SELECTORS.MESSAGE_BUTTON);
+    let messageButton;
+    try {
+      // Try XPath first with proper type assertion
+      const messageButtons = await (page as any).$x(LINKEDIN_SELECTORS.MESSAGE_BUTTON);
+      messageButton = messageButtons[0];
+    } catch (xpathError) {
+      console.log('XPath selector failed for message button, trying CSS selectors:', (xpathError as Error).message);
+      // Fallback to CSS selectors
+      const cssSelectors = [
+        'button[aria-label*="Message"]',
+        'button[aria-label*="Nachricht"]',
+        'button[data-control-name="message"]',
+        'button:has-text("Message")',
+        'button:has-text("Nachricht")'
+      ];
+      
+      for (const selector of cssSelectors) {
+        try {
+          messageButton = await page.$(selector);
+          if (messageButton) {
+            const text = await messageButton.evaluate(el => el.textContent?.toLowerCase() || '');
+            if (text.includes('message') || text.includes('nachricht')) {
+              break;
+            }
+          }
+        } catch (cssError) {
+          continue;
+        }
+      }
+    }
+    
     if (!messageButton) {
       throw new Error('Message button not found - user may not be connected or messaging is disabled');
     }
@@ -40,10 +70,38 @@ export async function sendMessage(
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Find and click send button
-    const sendBtn = await (page as any).waitForXPath(
-      LINKEDIN_SELECTORS.SEND_MESSAGE_BUTTON,
-      { timeout: 5000 }
-    );
+    let sendBtn;
+    try {
+      // Try XPath first with proper type assertion
+      sendBtn = await (page as any).waitForXPath(
+        LINKEDIN_SELECTORS.SEND_MESSAGE_BUTTON,
+        { timeout: 5000 }
+      );
+    } catch (xpathError) {
+      console.log('XPath selector failed for send message button, trying CSS selectors:', (xpathError as Error).message);
+      // Fallback to CSS selectors
+      const cssSelectors = [
+        'button[aria-label*="Send"]',
+        'button[aria-label*="Senden"]',
+        'button[data-control-name="send"]',
+        'button:has-text("Send")',
+        'button:has-text("Senden")'
+      ];
+      
+      for (const selector of cssSelectors) {
+        try {
+          sendBtn = await page.waitForSelector(selector, { timeout: 2000 });
+          if (sendBtn) {
+            const text = await sendBtn.evaluate(el => el.textContent?.toLowerCase() || '');
+            if (text.includes('send') || text.includes('senden')) {
+              break;
+            }
+          }
+        } catch (cssError) {
+          continue;
+        }
+      }
+    }
     
     if (!sendBtn) {
       throw new Error('Send message button not found');
