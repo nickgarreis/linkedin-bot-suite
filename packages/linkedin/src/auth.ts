@@ -172,9 +172,41 @@ export async function initLinkedInContext(
         
         // Try to click GDPR/cookie banner if present
         try {
-          const acceptButtons = await (page as any).$x(
-            "//button[contains(.,'Akzeptieren') or contains(.,'Accept all') or contains(.,'Alle akzeptieren')]"
-          );
+          // Use proper XPath method and add CSS fallback
+          let acceptButtons: any[] = [];
+          
+          try {
+            // Try XPath first
+            acceptButtons = await (page as any).$x("//button[contains(.,'Akzeptieren') or contains(.,'Accept all') or contains(.,'Alle akzeptieren')]");
+          } catch (xpathError) {
+            console.log('XPath selector failed, trying CSS selectors:', (xpathError as Error).message);
+            // Fallback to CSS selectors for common cookie banner buttons
+            const cssSelectors = [
+              'button[data-test-id*="accept"]',
+              'button[aria-label*="Accept"]',
+              'button[id*="accept"]',
+              'button[class*="accept"]',
+              '[data-test="accept-all-cookies"]',
+              '.artdeco-global-alert button'
+            ];
+            
+            for (const selector of cssSelectors) {
+              try {
+                const element = await page.$(selector);
+                if (element) {
+                  const text = await element.evaluate(el => el.textContent?.toLowerCase() || '');
+                  if (text.includes('accept') || text.includes('akzeptieren')) {
+                    acceptButtons = [element];
+                    break;
+                  }
+                }
+              } catch (cssError) {
+                // Continue to next selector
+                continue;
+              }
+            }
+          }
+          
           if (acceptButtons.length > 0) {
             console.log('Cookie banner detected – clicking accept button');
             await acceptButtons[0].click();

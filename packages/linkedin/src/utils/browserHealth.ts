@@ -189,10 +189,29 @@ export async function checkPageHealth(
       }
     }
 
-    // Check document state
-    if (pageInfo.readyState !== 'complete' && pageInfo.readyState !== 'interactive') {
-      result.error = `Page not ready: ${pageInfo.readyState}`;
-      return result;
+    // Check document state - be more lenient about loading state
+    if (pageInfo.readyState === 'loading') {
+      // Wait a bit and check again if page is still loading
+      try {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const retryInfo = await page.evaluate(() => ({
+          readyState: document.readyState,
+          hasBody: !!document.body
+        }));
+        
+        if (retryInfo.readyState === 'loading' && !retryInfo.hasBody) {
+          result.error = `Page not ready after retry: ${retryInfo.readyState}`;
+          return result;
+        }
+        
+        // Update pageInfo with retry results
+        pageInfo.readyState = retryInfo.readyState;
+        pageInfo.hasBody = retryInfo.hasBody;
+        console.log(`Page state improved after retry: ${retryInfo.readyState}`);
+      } catch (retryError) {
+        // If retry fails, continue with original state but log warning
+        console.warn('Page readyState retry failed, continuing with loading state:', (retryError as Error).message);
+      }
     }
 
     if (!pageInfo.hasBody) {
@@ -382,14 +401,58 @@ export function categorizeError(error: Error): ErrorCategory {
 }
 
 /**
- * Cleanup user data directory
+ * Cleanup user data directory with modern fs.rm and retry logic
  */
 export async function cleanupUserDataDir(userDataDir: string): Promise<void> {
-  try {
-    const { rmdir } = await import('fs/promises');
-    await rmdir(userDataDir, { recursive: true });
-    console.log(`Cleaned up user data directory: ${userDataDir}`);
-  } catch (error) {
-    console.error(`Failed to cleanup user data directory ${userDataDir}:`, error);
+  const maxRetries = 3;
+  const retryDelay = 1000; // 1 second
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const { rm } = await import('fs/promises');
+      await rm(userDataDir, { 
+        recursive: true, 
+        force: true,
+        maxRetries: 3,
+        retryDelay: 100
+      });
+      console.log(`Cleaned up user data directory: ${userDataDir}`);
+      return;
+    } catch (error: any) {
+      const isLastAttempt = attempt === maxRetries;
+      
+      if (error.code === 'ENOENT') {
+        // Directory doesn't exist, consider it cleaned
+        console.log(`User data directory already cleaned: ${userDataDir}`);
+        return;
+      }
+      
+      if (error.code === 'ENOTEMPTY' || error.code === 'EBUSY') {
+        if (isLastAttempt) {
+          console.error(`Failed to cleanup user data directory ${userDataDir} after ${maxRetries} attempts:`, error);
+          
+          // Try force cleanup as last resort
+          try {
+            const { exec } = await import('child_process');
+            const { promisify } = await import('util');
+            const execAsync = promisify(exec);
+            
+            console.log(`Attempting force cleanup of ${userDataDir}`);
+            await execAsync(`rm -rf "${userDataDir}"`, { timeout: 5000 });
+            console.log(`Force cleanup successful: ${userDataDir}`);
+            return;
+          } catch (forceError) {
+            console.error(`Force cleanup also failed:`, forceError);
+          }
+        } else {
+          console.warn(`Cleanup attempt ${attempt} failed (${error.code}), retrying in ${retryDelay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        }
+      } else {
+        // Other errors, log and exit
+        console.error(`Failed to cleanup user data directory ${userDataDir}:`, error);
+        return;
+      }
+    }
   }
 }
