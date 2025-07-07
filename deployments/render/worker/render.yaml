@@ -1,0 +1,36 @@
+services:
+  - type: background
+    name: linkedin-bot-worker
+    env: node
+    plan: starter
+    buildCommand: pnpm install && pnpm run build:worker
+    startCommand: pnpm --filter @linkedin-bot-suite/worker start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: linkedin-bot-redis
+          property: connectionString
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE
+        sync: false
+      - key: LINKEDIN_COOKIES_JSON
+        sync: false
+      - key: PROXY_URL
+        sync: false
+      - key: QUEUE_NAME
+        value: linkedin-jobs
+      - key: BULLMQ_PREFIX
+        value: bull
+      - key: WORKER_CONCURRENCY
+        value: 2
+      - key: LOG_LEVEL
+        value: info
+    
+  - type: redis
+    name: linkedin-bot-redis
+    plan: starter
+    maxmemoryPolicy: allkeys-lru

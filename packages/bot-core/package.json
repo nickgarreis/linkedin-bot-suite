@@ -1,0 +1,21 @@
+{
+  "name": "@linkedin-bot-suite/bot-core",
+  "version": "1.0.0",
+  "description": "Core bot functionality",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "bullmq": "^5.56.1",
+    "ioredis": "^5.6.1",
+    "pino": "^9.7.0",
+    "@supabase/supabase-js": "^2.50.3",
+    "@linkedin-bot-suite/shared": "workspace:*",
+    "@linkedin-bot-suite/linkedin": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10"
+  }
+}

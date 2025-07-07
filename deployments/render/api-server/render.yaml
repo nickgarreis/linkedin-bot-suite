@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: linkedin-bot-api
+    env: node
+    plan: starter
+    buildCommand: pnpm install && pnpm run build:api
+    startCommand: pnpm --filter @linkedin-bot-suite/api-server start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: HOST
+        value: 0.0.0.0
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: linkedin-bot-redis
+          property: connectionString
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: LINKEDIN_COOKIES_JSON
+        sync: false
+      - key: CORS_ORIGIN
+        value: "*"
+      - key: LOG_LEVEL
+        value: info
+      - key: QUEUE_NAME
+        value: linkedin-jobs
+      - key: BULLMQ_PREFIX
+        value: bull
+    
+  - type: redis
+    name: linkedin-bot-redis
+    plan: starter
+    maxmemoryPolicy: allkeys-lru

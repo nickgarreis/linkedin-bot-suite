@@ -1,0 +1,302 @@
+{
+  "name": "LinkedIn Outreach Campaign",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "workflow-start",
+      "name": "When clicking \"Test workflow\"",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "profileUrl",
+              "value": "https://linkedin.com/in/example-profile"
+            },
+            {
+              "name": "personalNote",
+              "value": "Hi! I'd love to connect and learn about your experience in tech."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-profile-data",
+      "name": "Set Profile Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://your-linkedin-bot-api.onrender.com/webhook/linkedin/invite",
+        "options": {
+          "headers": {
+            "x-api-key": "your-api-key-here"
+          }
+        },
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "type",
+              "value": "invite"
+            },
+            {
+              "name": "profileUrl",
+              "value": "={{ $json.profileUrl }}"
+            },
+            {
+              "name": "note",
+              "value": "={{ $json.personalNote }}"
+            },
+            {
+              "name": "workflowId",
+              "value": "linkedin-outreach-{{ new Date().getTime() }}"
+            },
+            {
+              "name": "n8nWebhookUrl",
+              "value": "{{ $webhook.url }}"
+            },
+            {
+              "name": "priority",
+              "value": 5
+            }
+          ]
+        }
+      },
+      "id": "send-invitation",
+      "name": "Send LinkedIn Invitation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.success }}",
+              "operation": "equal",
+              "value2": "true"
+            }
+          ]
+        }
+      },
+      "id": "check-success",
+      "name": "Check if Successful",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "Invitation sent successfully"
+            },
+            {
+              "name": "jobId",
+              "value": "={{ $json.data.jobId }}"
+            },
+            {
+              "name": "profileUrl",
+              "value": "={{ $json.data.profileUrl }}"
+            }
+          ]
+        }
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "Failed to send invitation"
+            },
+            {
+              "name": "error",
+              "value": "={{ $json.error }}"
+            }
+          ]
+        }
+      },
+      "id": "error-response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "linkedin-webhook",
+        "options": {}
+      },
+      "id": "webhook-listener",
+      "name": "Webhook for Job Completion",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equal",
+              "value2": "completed"
+            }
+          ]
+        }
+      },
+      "id": "check-completion",
+      "name": "Check Completion Status",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [460, 500]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "message",
+              "value": "LinkedIn invitation completed successfully!"
+            },
+            {
+              "name": "jobId",
+              "value": "={{ $json.jobId }}"
+            }
+          ]
+        }
+      },
+      "id": "completion-success",
+      "name": "Job Completed",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "message",
+              "value": "LinkedIn invitation failed"
+            },
+            {
+              "name": "error",
+              "value": "={{ $json.result.error }}"
+            }
+          ]
+        }
+      },
+      "id": "completion-failed",
+      "name": "Job Failed",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [680, 600]
+    }
+  ],
+  "connections": {
+    "When clicking \"Test workflow\"": {
+      "main": [
+        [
+          {
+            "node": "Set Profile Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Profile Data": {
+      "main": [
+        [
+          {
+            "node": "Send LinkedIn Invitation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send LinkedIn Invitation": {
+      "main": [
+        [
+          {
+            "node": "Check if Successful",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Successful": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook for Job Completion": {
+      "main": [
+        [
+          {
+            "node": "Check Completion Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Completion Status": {
+      "main": [
+        [
+          {
+            "node": "Job Completed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Job Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
