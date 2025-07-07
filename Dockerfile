@@ -61,8 +61,8 @@ RUN pnpm run build
 RUN /usr/bin/google-chrome-stable --version
 
 # Create a non-root user to run the application
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nodejs -u 1001
+RUN groupadd -g 1001 nodejs
+RUN useradd -r -u 1001 -g nodejs nodejs
 
 # Change to nodejs user
 USER nodejs
