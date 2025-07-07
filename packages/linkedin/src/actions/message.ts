@@ -16,7 +16,7 @@ export async function sendMessage(
     }
     
     await messageButton.click();
-    await page.waitForTimeout(2000); // Wait for message window to open
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for message window to open
 
     // Find the message input area
     const messageInput = await page.waitForSelector(
@@ -35,9 +35,9 @@ export async function sendMessage(
     await page.keyboard.up('Control');
     await page.keyboard.press('Delete');
     
-    await page.waitForTimeout(500);
+    await new Promise(resolve => setTimeout(resolve, 500));
     await messageInput.type(message);
-    await page.waitForTimeout(1000);
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Find and click send button
     const sendBtn = await (page as any).waitForXPath(
@@ -50,7 +50,7 @@ export async function sendMessage(
     }
     
     await sendBtn.click();
-    await page.waitForTimeout(2000); // Wait for message to be sent
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for message to be sent
 
     return {
       success: true,

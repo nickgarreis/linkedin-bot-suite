@@ -8,7 +8,7 @@ export async function viewProfile(
 
   try {
     // Wait for the profile to load
-    await page.waitForTimeout(2000);
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Extract basic profile information
     const profileData = await page.evaluate(() => {
@@ -52,18 +52,18 @@ export async function viewProfile(
     await page.evaluate(() => {
       window.scrollTo(0, document.body.scrollHeight / 2);
     });
-    await page.waitForTimeout(1000);
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     await page.evaluate(() => {
       window.scrollTo(0, document.body.scrollHeight);
     });
-    await page.waitForTimeout(1000);
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Scroll back to top
     await page.evaluate(() => {
       window.scrollTo(0, 0);
     });
-    await page.waitForTimeout(500);
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     return {
       success: true,

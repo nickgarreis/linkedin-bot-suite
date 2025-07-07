@@ -3,7 +3,7 @@ import { Queue } from 'bullmq';
 import { createClient } from '@supabase/supabase-js';
 import { CONFIG } from '../config';
 
-const router = Router();
+const router: Router = Router();
 const supabase = createClient(CONFIG.supabase.url, CONFIG.supabase.serviceRoleKey);
 
 // Basic health check

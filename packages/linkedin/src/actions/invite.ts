@@ -16,7 +16,7 @@ export async function sendInvitation(
     }
     
     await connect.click();
-    await page.waitForTimeout(1000); // Wait for modal to appear
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for modal to appear
 
     if (note) {
       try {
@@ -26,11 +26,11 @@ export async function sendInvitation(
         );
         if (noteBtn) {
           await noteBtn.click();
-          await page.waitForTimeout(500);
+          await new Promise(resolve => setTimeout(resolve, 500));
           
           // Clear existing text and type new note
           await page.type('textarea[name="message"]', note);
-          await page.waitForTimeout(500);
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
       } catch (error) {
         console.warn('Note button not found, sending invitation without note');
@@ -47,7 +47,7 @@ export async function sendInvitation(
     }
     
     await sendBtn.click();
-    await page.waitForTimeout(2000); // Wait for invitation to be sent
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for invitation to be sent
 
     return {
       success: true,

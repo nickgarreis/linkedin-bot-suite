@@ -6,7 +6,7 @@ import { validateJobPayload, validateBulkJobPayload } from '../middleware/valida
 import { webhookRateLimit, bulkRateLimit } from '../middleware/rateLimiting';
 import { API_PERMISSIONS } from '@linkedin-bot-suite/shared';
 
-const router = Router();
+const router: Router = Router();
 const jobService = new JobService();
 const webhookService = new WebhookService();
 

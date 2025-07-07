@@ -27,3 +27,6 @@ new QueueEvents(queueName, {
 }).on('completed', ({ jobId }) => {
   log.info({ jobId }, 'Job erledigt');
 });
+
+// Export the processor function
+export { processJob } from './processor';

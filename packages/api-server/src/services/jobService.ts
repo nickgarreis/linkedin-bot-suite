@@ -89,8 +89,8 @@ export class JobService {
     return {
       workflowRunId,
       totalJobs: jobs.length,
-      createdJobs: results.filter(r => !r.error).length,
-      failedJobs: results.filter(r => r.error).length,
+      createdJobs: results.filter(r => !('error' in r)).length,
+      failedJobs: results.filter(r => 'error' in r).length,
       jobs: results,
     };
   }

@@ -6,7 +6,19 @@
     "target": "ES2020",
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "strict": true
+    "strict": true,
+    "composite": true,
+    "declaration": true,
+    "moduleResolution": "node",
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true
   },
-  "include": ["packages/**/*", "clients/**/*"]
+  "include": [],
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/linkedin" },
+    { "path": "./packages/bot-core" },
+    { "path": "./packages/api-server" },
+    { "path": "./packages/worker" }
+  ]
 }

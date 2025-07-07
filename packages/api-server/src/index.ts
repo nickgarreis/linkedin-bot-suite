@@ -11,7 +11,7 @@ import healthRouter from './routes/health';
 // Validate configuration
 validateConfig();
 
-const app = express();
+const app: express.Application = express();
 
 // Security middleware
 app.use(helmet());

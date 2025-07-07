@@ -16,8 +16,8 @@ const worker = new Worker<LinkedInJob>(queueName, processJob, {
   connection: { url: process.env.REDIS_URL! },
   concurrency,
   prefix: process.env.BULLMQ_PREFIX || 'bull',
-  removeOnComplete: 100,
-  removeOnFail: 50,
+  removeOnComplete: { count: 100 },
+  removeOnFail: { count: 50 },
 });
 
 worker.on('ready', () => {

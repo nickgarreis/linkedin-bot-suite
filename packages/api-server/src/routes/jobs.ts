@@ -4,7 +4,7 @@ import { authenticateApiKey, requirePermission, AuthenticatedRequest } from '../
 import { defaultRateLimit } from '../middleware/rateLimiting';
 import { API_PERMISSIONS } from '@linkedin-bot-suite/shared';
 
-const router = Router();
+const router: Router = Router();
 const jobService = new JobService();
 
 // Get job status
