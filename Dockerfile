@@ -67,8 +67,8 @@ RUN groupadd -g 1001 nodejs
 RUN useradd -r -u 1001 -g nodejs -m -d /home/nodejs nodejs
 
 # Create Chrome directories and set permissions
-RUN mkdir -p /tmp/chrome-user-data /tmp/chrome-data && \
-    chown -R nodejs:nodejs /tmp/chrome-user-data /tmp/chrome-data
+RUN mkdir -p /tmp/chrome-user-data /tmp/chrome-data /home/nodejs/.local/share/applications && \
+    chown -R nodejs:nodejs /tmp/chrome-user-data /tmp/chrome-data /home/nodejs
 
 # Change to nodejs user
 USER nodejs

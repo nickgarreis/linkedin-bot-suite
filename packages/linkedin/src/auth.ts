@@ -31,7 +31,7 @@ export async function initLinkedInContext(
       '--disable-features=TranslateUI',
       '--disable-ipc-flooding-protection',
       '--single-process',
-      '--user-data-dir=/tmp/chrome-user-data',
+      `--user-data-dir=/tmp/chrome-user-data-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       '--data-path=/tmp/chrome-data',
       '--homedir=/tmp',
       '--disable-crash-reporter',
