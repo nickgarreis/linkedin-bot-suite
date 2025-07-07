@@ -1,32 +1,32 @@
-import { Page } from 'playwright';
-import { log } from '../bot-core/src/index';
+import { Page } from 'puppeteer';
 
-/**
- * Sendet auf einer Profil-URL eine LinkedIn-Einladung.
- * @param page Geöffnete Playwright-Seite (eingeloggt!)
- * @param profileUrl Vollständige LinkedIn-Profil-URL
- * @param note Optionaler Einladungstext (≤ 300 Zeichen)
- */
 export async function sendInvitation(
   page: Page,
   profileUrl: string,
   note?: string
 ): Promise<void> {
-  await page.goto(profileUrl, { waitUntil: 'networkidle' });
+  await page.goto(profileUrl, { waitUntil: 'networkidle0' });
 
-  const connectBtn = await page.$('button:has-text("Vernetzen")');
-  if (!connectBtn) throw new Error('Vernetzen-Button nicht gefunden');
-
-  await connectBtn.click();
+  const [connect] = await (page as any).$x(
+    '//button[normalize-space(text())="Vernetzen" or normalize-space(text())="Connect"]'
+  );
+  if (!connect) throw new Error('Connect button not found');
+  await connect.click();
 
   if (note) {
-    const noteBtn = await page.waitForSelector('button:has-text("Notiz")');
-    await noteBtn.click();
-    await page.fill('textarea[name="message"]', note);
+    const noteBtn = await (page as any).waitForXPath(
+      '//button[contains(text(),"Notiz") or contains(text(),"Add a note")]',
+      { timeout: 5000 }
+    );
+    if (!noteBtn) throw new Error('Note button not found');
+    await noteBtn!.click();
+    await page.type('textarea[name="message"]', note);
   }
 
-  const sendBtn = await page.waitForSelector('button:has-text("Einladung senden")');
-  await sendBtn.click();
-
-  log.info({ profileUrl }, '✅ Einladung gesendet');
+  const sendBtn = await (page as any).waitForXPath(
+    '//button[contains(text(),"Einladung senden") or contains(text(),"Send invite")]',
+    { timeout: 5000 }
+  );
+  if (!sendBtn) throw new Error('Send button not found');
+  await sendBtn!.click();
 }
