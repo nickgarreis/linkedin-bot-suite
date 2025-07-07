@@ -1,3 +1,4 @@
+import { log } from './logger';
 import { Queue, QueueEvents } from 'bullmq';
 import { createClient } from '@supabase/supabase-js';
 import pino from 'pino';
