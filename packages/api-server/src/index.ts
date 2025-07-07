@@ -2,11 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import cron from 'node-cron';
 import { CONFIG, validateConfig } from './config';
 import { defaultRateLimit } from './middleware/rateLimiting';
 import webhooksRouter from './routes/webhooks';
 import jobsRouter from './routes/jobs';
 import healthRouter from './routes/health';
+import internalRouter from './routes/internal';
 
 // Validate configuration
 validateConfig();
@@ -31,6 +33,7 @@ app.use(defaultRateLimit);
 app.use('/health', healthRouter);
 app.use('/webhook', webhooksRouter);
 app.use('/jobs', jobsRouter);
+app.use('/internal', internalRouter);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -68,6 +71,43 @@ app.use('*', (req, res) => {
 const server = app.listen(CONFIG.server.port, CONFIG.server.host, () => {
   console.log(`Server running on ${CONFIG.server.host}:${CONFIG.server.port}`);
   console.log(`Environment: ${CONFIG.server.env}`);
+});
+
+// Cookie validation function for health monitoring
+async function validateCookiesHealth(): Promise<boolean> {
+  try {
+    const cookies = process.env.LINKEDIN_COOKIES_JSON || '[]';
+    const parsedCookies = JSON.parse(cookies);
+    const liAt = parsedCookies.find((c: any) => c.name === 'li_at')?.value;
+    if (!liAt) return false;
+
+    const fetch = (await import('node-fetch')).default;
+    const resp = await fetch('https://www.linkedin.com/feed', {
+      headers: { cookie: `li_at=${liAt}` },
+      redirect: 'manual'
+    });
+    return resp.status === 200;
+  } catch {
+    return false;
+  }
+}
+
+// Nightly cookie health check - runs at 03:00 every day
+cron.schedule('0 3 * * *', async () => {
+  console.log('🔍 Running nightly LinkedIn cookie health check...');
+  try {
+    const isHealthy = await validateCookiesHealth();
+    if (!isHealthy) {
+      console.error('⚠️  LinkedIn cookies invalid during nightly check – please refresh cookies');
+      // Optional: send webhook notification or email alert here
+    } else {
+      console.log('✅ LinkedIn cookies healthy during nightly check');
+    }
+  } catch (error) {
+    console.error('❌ Error during nightly cookie health check:', error);
+  }
+}, {
+  timezone: "UTC"
 });
 
 // Graceful shutdown

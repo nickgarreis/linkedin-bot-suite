@@ -87,12 +87,19 @@ export async function initLinkedInContext(
     page = pages[0] || await browser.newPage();
     console.log('Page created successfully');
     
-    // Set default timeouts
-    page.setDefaultNavigationTimeout(60000);
-    page.setDefaultTimeout(30000);
+    // Set default timeouts - extended for stability
+    page.setDefaultNavigationTimeout(60000); // 60s navigation timeout
+    page.setDefaultTimeout(45000);           // 45s operations timeout
     
     // Set viewport
     await page.setViewport({ width: 1920, height: 1080 });
+    
+    // Clear cache and storage before navigation to prevent redirect loops
+    await page.goto('about:blank');
+    await page.evaluate(() => {
+      localStorage.clear();
+      sessionStorage.clear();
+    });
     
     // Set user agent BEFORE navigating - updated to latest Chrome
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
@@ -131,127 +138,63 @@ export async function initLinkedInContext(
       }
     }
 
-  // Staged navigation flow - first go to main page to establish session
+  // Robust navigation with retry targets
+  const targets = [
+    'https://www.linkedin.com/feed/',
+    'https://www.linkedin.com/'
+  ];
+
+  let navOK = false;
   let currentUrl = '';
-  let redirectCount = 0;
-  const maxRedirects = 5;
   
-  try {
-    console.log('Stage 1: Navigating to LinkedIn main page to establish session...');
-    await page.goto('https://www.linkedin.com/', { 
-      waitUntil: 'networkidle0',
-      timeout: 30000 
-    });
-    
-    // Wait for session to establish
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    currentUrl = page.url();
-    console.log('Stage 1 complete. Current URL:', currentUrl);
-    
-    // Check for immediate redirect to login (but allow /hp homepage)
-    if (currentUrl.includes('/login') || currentUrl.includes('/authwall')) {
-      throw new Error('LinkedIn authentication failed - redirected to login page immediately. Cookies may be invalid or expired.');
-    }
-    
-    // Handle LinkedIn homepage redirect (common in some regions)
-    if (currentUrl.includes('/hp')) {
-      console.log('Redirected to LinkedIn homepage (/hp), attempting to navigate to feed...');
-      try {
-        await page.goto('https://www.linkedin.com/feed', { 
-          waitUntil: 'domcontentloaded',
-          timeout: 30000 
-        });
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        currentUrl = page.url();
-        console.log('Successfully navigated from /hp to feed. Current URL:', currentUrl);
-      } catch (hpNavError) {
-        console.log('Failed to navigate from /hp to feed, but /hp indicates authentication success');
-      }
-    }
-    
-    // Stage 2: Navigate to feed
-    console.log('Stage 2: Navigating to LinkedIn feed...');
-    
-    // Listen for navigation events to detect redirect loops
-    page.on('response', (response) => {
-      if (response.status() >= 300 && response.status() < 400) {
-        redirectCount++;
-        console.log(`Redirect ${redirectCount}: ${response.status()} to ${response.headers().location}`);
-        
-        if (redirectCount >= maxRedirects) {
-          throw new Error(`Too many redirects detected (${redirectCount}). Possible redirect loop.`);
-        }
-      }
-    });
-    
-    await page.goto('https://www.linkedin.com/feed', { 
-      waitUntil: 'networkidle0',
-      timeout: 30000 
-    });
-    
-    // Wait for any final redirects to settle
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Add health check after navigation
-    const navigationHealth = await checkPageHealth(page);
-    if (!navigationHealth.isHealthy) {
-      throw new Error(`Page health check failed after navigation: ${navigationHealth.error}`);
-    }
-    
-  } catch (error) {
-    currentUrl = page.url();
-    console.log('Navigation error. Current URL:', currentUrl);
-    
-    // Skip screenshot in production to prevent crashes
-    console.log('Navigation error occurred, skipping screenshot to prevent session close');
-    
-    // Enhanced error analysis with safe evaluation
-    const errorAnalysis = await safeEvaluate(page, () => {
-      return {
-        title: document.title,
-        hasLoginForm: !!document.querySelector('form[action*="login"]'),
-        hasAuthWall: !!document.querySelector('.authwall'),
-        hasChallenge: !!document.querySelector('.challenge'),
-        hasError: !!document.querySelector('.error-message'),
-        bodyClasses: document.body?.className || '',
-        currentPath: window.location.pathname,
-        hasRedirectMeta: !!document.querySelector('meta[http-equiv="refresh"]'),
-        pageText: document.body?.innerText?.substring(0, 500) || ''
-      };
-    }) as any;
-    
-    console.log('Error analysis:', errorAnalysis);
-    
-    // Check if we ended up on login page
-    if (currentUrl.includes('/login') || currentUrl.includes('/authwall') || errorAnalysis?.hasLoginForm || errorAnalysis?.hasAuthWall) {
-      throw new Error(`LinkedIn authentication failed - redirected to login page. Cookies may be invalid or expired. Page analysis: ${JSON.stringify(errorAnalysis)}`);
-    }
-    
-    // If it's a redirect loop error, provide specific message
-    if (error instanceof Error && error.message.includes('Too many redirects')) {
-      throw new Error(`LinkedIn authentication failed - redirect loop detected. This usually indicates cookie issues. Page analysis: ${JSON.stringify(errorAnalysis)}`);
-    }
-    
-    // Check for security challenges or verification
-    if (errorAnalysis?.hasChallenge || currentUrl.includes('/challenge')) {
-      throw new Error(`LinkedIn security challenge detected. Manual verification may be required. Page analysis: ${JSON.stringify(errorAnalysis)}`);
-    }
-    
-    // For other navigation errors, try emergency fallback
-    console.log('Primary navigation failed, attempting emergency fallback...');
+  for (const target of targets) {
     try {
-      await page.goto('https://www.linkedin.com/feed/?doFeedRefresh=true', { 
+      console.log(`Navigating to ${target}`);
+      const resp = await page.goto(target, {
         waitUntil: 'domcontentloaded',
-        timeout: 20000 
+        timeout: 45000
       });
-      await new Promise(resolve => setTimeout(resolve, 3000));
-    } catch (fallbackError) {
-      // Skip final screenshot to prevent crashes
-      console.log('Fallback navigation also failed, skipping screenshot to prevent session close');
       
-      throw new Error(`Navigation failed completely. Original error: ${error instanceof Error ? error.message : 'Unknown error'}. Fallback error: ${fallbackError instanceof Error ? fallbackError.message : 'Unknown fallback error'}. Page analysis: ${JSON.stringify(errorAnalysis)}`);
+      await new Promise(resolve => setTimeout(resolve, 2500)); // Let redirects finish
+      currentUrl = page.url();
+      console.log(`Landed on ${currentUrl}`);
+
+      if (!currentUrl.includes('/login') &&
+          !currentUrl.includes('/authwall') &&
+          !currentUrl.includes('/checkpoint') &&
+          currentUrl !== 'about:blank') {
+        navOK = true;
+        
+        // Try to click GDPR/cookie banner if present
+        try {
+          const acceptButtons = await (page as any).$x(
+            "//button[contains(.,'Akzeptieren') or contains(.,'Accept all') or contains(.,'Alle akzeptieren')]"
+          );
+          if (acceptButtons.length > 0) {
+            console.log('Cookie banner detected – clicking accept button');
+            await acceptButtons[0].click();
+            await new Promise(resolve => setTimeout(resolve, 1500));
+          }
+        } catch (bannerError) {
+          // Ignore banner click errors
+          console.log('Cookie banner click failed, continuing:', (bannerError as Error).message);
+        }
+        
+        break;
+      }
+    } catch (navError) {
+      console.warn(`Navigation to ${target} failed:`, (navError as Error).message);
     }
+  }
+  
+  if (!navOK) {
+    throw new Error('LinkedIn authentication failed – redirected to login/authwall on all targets');
+  }
+  
+  // Add health check after successful navigation
+  const navigationHealth = await checkPageHealth(page);
+  if (!navigationHealth.isHealthy) {
+    throw new Error(`Page health check failed after navigation: ${navigationHealth.error}`);
   }
 
   // Final URL check

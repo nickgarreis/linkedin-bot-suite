@@ -126,6 +126,11 @@ pnpm add -D <package> -w
 - `API_KEY_HEADER` - API key header name (default: x-api-key)
 - `LOG_LEVEL` - Logging level (default: info)
 
+### Cookie Management Environment Variables
+- `INTERNAL_API_KEY` - Secure random string for internal cookie management endpoints
+- `RENDER_API_KEY` - Render.com API key for automatic redeployment (optional)
+- `RENDER_SERVICE_ID` - Worker service ID on Render.com for redeployment (optional)
+
 ### Worker Environment Variables
 - `WORKER_CONCURRENCY` - Number of concurrent jobs (default: 2)
 - `PROXY_URL` - HTTP proxy for LinkedIn requests (optional)

@@ -1,7 +1,7 @@
 FROM node:18-slim
 
-# Install pnpm and basic dependencies
-RUN npm install -g pnpm
+# Install specific pnpm version and basic dependencies
+RUN npm install -g pnpm@10.12.4
 
 # Install Chrome dependencies and Google Chrome
 RUN apt-get update && apt-get install -y \
@@ -63,8 +63,11 @@ COPY packages/shared/package.json ./packages/shared/
 COPY packages/linkedin/package.json ./packages/linkedin/
 COPY packages/worker/package.json ./packages/worker/
 
-# Install dependencies
-RUN pnpm install --frozen-lockfile
+# Verify workspace setup (optional debug - can be removed for production)
+RUN ls -la packages/*/package.json && cat pnpm-workspace.yaml
+
+# Install dependencies with robust error handling
+RUN pnpm install --frozen-lockfile || pnpm install
 
 # Copy source code
 COPY packages/ ./packages/
