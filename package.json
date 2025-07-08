@@ -8,7 +8,7 @@
     "build:shared": "pnpm --filter @linkedin-bot-suite/shared build",
     "build:linkedin": "pnpm --filter @linkedin-bot-suite/linkedin build",
     "build:bot-core": "pnpm --filter @linkedin-bot-suite/bot-core build",
-    "build:api": "pnpm --filter @linkedin-bot-suite/api-server build",
+    "build:api": "pnpm run build:clean && pnpm run build:shared && pnpm run build:linkedin && pnpm run build:bot-core && pnpm --filter @linkedin-bot-suite/api-server build && echo 'Build verification:' && cd packages/api-server && ls -la dist/routes/ && echo 'API server build completed successfully'",
     "build:worker": "pnpm --filter @linkedin-bot-suite/worker build",
     "build:clean": "tsc --build --clean",
     "dev:api": "pnpm --filter @linkedin-bot-suite/api-server dev",
