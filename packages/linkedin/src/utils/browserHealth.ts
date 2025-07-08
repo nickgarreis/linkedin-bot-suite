@@ -1269,7 +1269,7 @@ export async function waitForPageStability(page: Page, stabilityPeriod: number =
 /**
  * Simplified LinkedIn page loading validation - faster and more reliable
  */
-export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'profile' | 'feed' | 'search' = 'profile', timeout: number = 6000): Promise<boolean> {
+export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'profile' | 'feed' | 'search' = 'profile', timeout: number = 10000): Promise<boolean> {
   const startTime = Date.now();
   console.log(`Waiting for LinkedIn ${expectedPageType} page to load...`);
   
@@ -1285,18 +1285,47 @@ export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'pro
     console.warn('Cookie check failed:', (error as Error).message);
   }
 
-  // Simplified wait strategy - just wait for basic elements
+  // Enhanced wait strategy with proper LinkedIn readiness detection
   try {
-    // Wait for body with shorter timeout
-    await page.waitForSelector('body', { timeout: 3000 });
+    // Wait for body element
+    await page.waitForSelector('body', { timeout: 5000 });
     
-    // Single, simple check for page readiness
+    // Wait for initial page structure
     await page.waitForFunction(() => {
-      // Basic checks only
       return document.readyState === 'complete' && 
-             document.querySelectorAll('*').length > 100 &&
-             !!document.querySelector('button');
-    }, { timeout: 3000 });
+             document.querySelectorAll('*').length > 100;
+    }, { timeout: 5000 });
+    
+    // Wait for LinkedIn-specific elements to be ready
+    await page.waitForFunction(() => {
+      // Check for LinkedIn global navigation
+      const hasGlobalNav = !!document.querySelector('.global-nav, .navigation-wrapper, [data-view-name="global-nav"]');
+      
+      // Check for main content area
+      const hasMainContent = !!document.querySelector('main, .main-content, [role="main"]');
+      
+      // Check for basic button elements
+      const hasButtons = document.querySelectorAll('button').length > 0;
+      
+      // Check that BIGPIPE rendering is complete (if present)
+      const bigpipeComplete = !document.body?.className?.includes('render-mode-BIGPIPE');
+      
+      return hasGlobalNav && hasMainContent && hasButtons && bigpipeComplete;
+    }, { timeout: 8000 });
+    
+    // Profile-specific readiness checks
+    if (expectedPageType === 'profile') {
+      await page.waitForFunction(() => {
+        // Wait for profile-specific elements
+        const hasProfileActions = !!document.querySelector('.pv-s-profile-actions, .pvs-profile-actions, .profile-actions');
+        const hasProfileContent = !!document.querySelector('.pv-profile-section, .pvs-list, .profile-section');
+        
+        // Check for profile header/photo area
+        const hasProfileHeader = !!document.querySelector('.pv-top-card, .pvs-header, .profile-header');
+        
+        return hasProfileActions || hasProfileContent || hasProfileHeader;
+      }, { timeout: 5000 });
+    }
     
     // Quick validation of current URL
     const currentUrl = page.url();
@@ -1305,12 +1334,47 @@ export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'pro
       return false;
     }
     
+    // Check for error pages
+    const hasErrorPage = await safeEvaluate(page, () => {
+      return !!(document.querySelector('.error-page, .not-found-page') ||
+                document.body?.textContent?.includes('This LinkedIn profile doesn\'t exist') ||
+                document.body?.textContent?.includes('Page not found'));
+    }, 2000);
+    
+    if (hasErrorPage) {
+      console.error('❌ LinkedIn error page detected');
+      return false;
+    }
+    
     console.log('✅ LinkedIn page loaded successfully');
     return true;
     
   } catch (error) {
-    console.warn('Page load timeout - proceeding anyway');
-    return true; // Return true to prevent retries
+    const elapsed = Date.now() - startTime;
+    console.warn(`Page load timeout after ${elapsed}ms - checking if page is usable`);
+    
+    // Final check - can we at least detect basic page structure?
+    const basicCheck = await safeEvaluate(page, () => {
+      return {
+        elementCount: document.querySelectorAll('*').length,
+        buttonCount: document.querySelectorAll('button').length,
+        hasLinkedInContent: !!document.querySelector('.global-nav, .navigation-wrapper, [data-view-name]'),
+        readyState: document.readyState
+      };
+    }, 3000);
+    
+    if (basicCheck && typeof basicCheck === 'object' && 
+        'elementCount' in basicCheck && typeof basicCheck.elementCount === 'number' &&
+        'buttonCount' in basicCheck && typeof basicCheck.buttonCount === 'number' &&
+        'hasLinkedInContent' in basicCheck) {
+      
+      const isUsable = basicCheck.elementCount > 200 && basicCheck.buttonCount > 0 && basicCheck.hasLinkedInContent;
+      console.log(`Page usability check: ${isUsable ? 'PASS' : 'FAIL'} (${basicCheck.elementCount} elements, ${basicCheck.buttonCount} buttons)`);
+      return isUsable;
+    }
+    
+    console.warn('Page load validation failed - proceeding with degraded expectations');
+    return true; // Proceed but with lower expectations
   }
 }
 
@@ -1801,17 +1865,33 @@ export async function analyzeLinkedInButtonStructure(page: Page): Promise<{
   try {
     console.log('🔍 Analyzing LinkedIn button structure...');
     
-    // Capture screenshot for visual debugging
-    const screenshot = await page.screenshot({ 
-      encoding: 'base64',
-      clip: { x: 0, y: 0, width: 1920, height: 1080 }
-    });
+    // First, get basic page state using safeEvaluate with timeout
+    const pageState = await safeEvaluate(page, () => {
+      return {
+        buttonCount: document.querySelectorAll('button').length,
+        isLinkedIn: window.location.hostname.includes('linkedin.com'),
+        readyState: document.readyState,
+        hasProfileActions: !!document.querySelector('.pv-s-profile-actions, .pvs-profile-actions, .profile-actions')
+      };
+    }, 3000);
     
-    // Get all button elements and their properties
-    const buttonAnalysis = await page.evaluate(() => {
+    if (!pageState || typeof pageState !== 'object') {
+      console.warn('Failed to get page state, skipping DOM analysis');
+      return {
+        buttons: [],
+        suggestions: ['Failed to get page state - execution context may be unstable'],
+        screenshot: undefined
+      };
+    }
+    
+    console.log(`📊 Page state: ${(pageState as any).buttonCount} buttons, ready: ${(pageState as any).readyState}`);
+    
+    // Get button analysis in smaller chunks to prevent context destruction
+    const buttonAnalysis = await safeEvaluate(page, () => {
       const buttons = Array.from(document.querySelectorAll('button'));
       
-      return buttons.map(button => {
+      // Process buttons in smaller batches to avoid large evaluation
+      return buttons.slice(0, 20).map(button => { // Limit to first 20 buttons
         const rect = button.getBoundingClientRect();
         const style = window.getComputedStyle(button);
         const isVisible = rect.width > 0 && rect.height > 0 && 
@@ -1823,30 +1903,38 @@ export async function analyzeLinkedInButtonStructure(page: Page): Promise<{
         const ariaLabel = button.getAttribute('aria-label') || '';
         const className = button.className || '';
         
-        // Get all data attributes
+        // Get only essential data attributes to reduce payload
         const dataAttributes: Record<string, string> = {};
-        for (const attr of button.attributes) {
-          if (attr.name.startsWith('data-')) {
-            dataAttributes[attr.name] = attr.value;
-          }
+        const essentialAttrs = ['data-control-name', 'data-view-name', 'data-test-id'];
+        for (const attrName of essentialAttrs) {
+          const value = button.getAttribute(attrName);
+          if (value) dataAttributes[attrName] = value;
         }
         
-        // Generate a unique selector
+        // Generate a simple selector
         let selector = 'button';
         if (button.id) selector += `#${button.id}`;
-        if (className) selector += `.${className.split(' ').join('.')}`;
-        if (ariaLabel) selector += `[aria-label="${ariaLabel}"]`;
+        if (ariaLabel) selector += `[aria-label*="${ariaLabel.slice(0, 50)}"]`;
         
         return {
-          text,
-          ariaLabel,
-          className,
+          text: text.slice(0, 100), // Limit text length
+          ariaLabel: ariaLabel.slice(0, 100), // Limit aria-label length
+          className: className.slice(0, 200), // Limit class length
           dataAttributes,
           selector: selector.slice(0, 200), // Limit selector length
           isVisible
         };
       });
-    });
+    }, 5000);
+    
+    if (!buttonAnalysis || !Array.isArray(buttonAnalysis)) {
+      console.warn('Button analysis failed, using fallback');
+      return {
+        buttons: [],
+        suggestions: ['Button analysis failed - DOM may be unstable'],
+        screenshot: undefined
+      };
+    }
     
     // Generate selector suggestions based on found buttons
     const suggestions = [];
@@ -1864,7 +1952,7 @@ export async function analyzeLinkedInButtonStructure(page: Page): Promise<{
     if (connectButtons.length > 0) {
       suggestions.push(`✅ Found ${connectButtons.length} Connect-like buttons`);
       connectButtons.forEach(btn => {
-        suggestions.push(`   Connect: "${btn.text}" | aria-label: "${btn.ariaLabel}" | class: "${btn.className}"`);
+        suggestions.push(`   Connect: "${btn.text}" | aria-label: "${btn.ariaLabel}"`);
       });
     } else {
       suggestions.push(`❌ No Connect buttons found`);
@@ -1883,7 +1971,7 @@ export async function analyzeLinkedInButtonStructure(page: Page): Promise<{
     if (messageButtons.length > 0) {
       suggestions.push(`✅ Found ${messageButtons.length} Message-like buttons`);
       messageButtons.forEach(btn => {
-        suggestions.push(`   Message: "${btn.text}" | aria-label: "${btn.ariaLabel}" | class: "${btn.className}"`);
+        suggestions.push(`   Message: "${btn.text}" | aria-label: "${btn.ariaLabel}"`);
       });
     } else {
       suggestions.push(`❌ No Message buttons found`);
@@ -1911,6 +1999,21 @@ export async function analyzeLinkedInButtonStructure(page: Page): Promise<{
     suggestions.unshift(`📊 Total buttons: ${buttonAnalysis.length} (${visibleButtons.length} visible)`);
     
     console.log(`📊 Button analysis complete: ${buttonAnalysis.length} buttons found (${visibleButtons.length} visible)`);
+    
+    // Optional small screenshot for debugging (only if needed)
+    let screenshot: string | undefined;
+    try {
+      if (buttonAnalysis.length > 0) {
+        screenshot = await page.screenshot({ 
+          encoding: 'base64',
+          clip: { x: 0, y: 0, width: 800, height: 600 }, // Smaller screenshot
+          quality: 50 // Lower quality to reduce memory
+        });
+      }
+    } catch (screenshotError) {
+      console.warn('Screenshot capture failed:', screenshotError);
+      screenshot = undefined;
+    }
     
     return {
       buttons: buttonAnalysis,
@@ -1945,6 +2048,12 @@ export async function findLinkedInButton(
   
   console.log(`🔍 Progressive search for ${buttonType} button (timeout: ${timeout}ms)`);
   
+  // First, check DOM stability before button detection
+  const domStable = await checkDOMStability(page);
+  if (!domStable) {
+    console.warn('⚠️ DOM appears unstable, proceeding with caution');
+  }
+  
   const strategies = [
     {
       name: 'modern-2025-selectors',
@@ -1976,35 +2085,64 @@ export async function findLinkedInButton(
     
     console.log(`🔍 Trying strategy: ${strategy.name}`);
     
+    // Check page state before each strategy
+    const pageState = await safeEvaluate(page, () => {
+      return {
+        isLinkedIn: window.location.hostname.includes('linkedin.com'),
+        hasButtons: document.querySelectorAll('button').length > 0,
+        isAuthWall: window.location.href.includes('/authwall') || window.location.href.includes('/login'),
+        hasProfileActions: !!document.querySelector('.pv-s-profile-actions, .pvs-profile-actions, .profile-actions'),
+        readyState: document.readyState
+      };
+    }, 2000);
+    
+    if (!pageState || typeof pageState !== 'object') {
+      console.warn(`⚠️ Page state check failed for strategy ${strategy.name}`);
+      continue;
+    }
+    
+    if ('isAuthWall' in pageState && pageState.isAuthWall) {
+      console.error('❌ Detected auth wall, stopping button search');
+      break;
+    }
+    
+    if ('hasButtons' in pageState && !pageState.hasButtons) {
+      console.warn('⚠️ No buttons found on page, continuing to next strategy');
+      continue;
+    }
+    
     try {
       for (const selector of strategy.selectors) {
         try {
           const element = await page.waitForSelector(selector, { 
-            timeout: 1000, 
+            timeout: 1500, // Increased slightly for stability
             visible: true 
           });
           
           if (element) {
-            // Verify element is actually clickable
-            const isClickable = await element.isIntersectingViewport();
-            if (isClickable) {
+            // Enhanced element validation
+            const elementValidation = await validateElement(element, page);
+            if (elementValidation.isValid) {
               console.log(`✅ Found ${buttonType} button using ${strategy.name}: ${selector}`);
+              console.log(`   Element validation: ${elementValidation.reason}`);
               return {
                 element,
                 strategy: strategy.name,
                 confidence: strategy.confidence,
                 selector
               };
+            } else {
+              console.warn(`⚠️ Element found but validation failed: ${elementValidation.reason}`);
             }
           }
         } catch (selectorError) {
-          // Continue to next selector
+          // Continue to next selector silently
           continue;
         }
       }
       
-      // Add small delay between strategies
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Add small delay between strategies with DOM stability check
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
     } catch (error) {
       console.warn(`Strategy ${strategy.name} failed:`, error);
@@ -2014,6 +2152,103 @@ export async function findLinkedInButton(
   
   console.log(`❌ No ${buttonType} button found after ${Date.now() - startTime}ms`);
   return null;
+}
+
+/**
+ * Check DOM stability before button detection
+ */
+async function checkDOMStability(page: Page): Promise<boolean> {
+  try {
+    const stabilityCheck = await safeEvaluate(page, () => {
+      const elementCount = document.querySelectorAll('*').length;
+      const buttonCount = document.querySelectorAll('button').length;
+      const hasLinkedInStructure = !!document.querySelector('.global-nav, .navigation-wrapper, [data-view-name]');
+      const bigpipeComplete = !document.body?.className?.includes('render-mode-BIGPIPE');
+      const hasProfileArea = !!document.querySelector('.pv-top-card, .pvs-header, .profile-header, .pv-s-profile-actions');
+      
+      return {
+        elementCount,
+        buttonCount,
+        hasLinkedInStructure,
+        bigpipeComplete,
+        hasProfileArea,
+        readyState: document.readyState
+      };
+    }, 3000);
+    
+    if (!stabilityCheck || typeof stabilityCheck !== 'object') {
+      return false;
+    }
+    
+    const {
+      elementCount,
+      buttonCount,
+      hasLinkedInStructure,
+      bigpipeComplete,
+      hasProfileArea,
+      readyState
+    } = stabilityCheck as any;
+    
+    const isStable = elementCount > 200 && 
+                     buttonCount > 0 && 
+                     hasLinkedInStructure &&
+                     bigpipeComplete &&
+                     readyState === 'complete';
+    
+    console.log(`🔍 DOM stability: ${isStable ? 'STABLE' : 'UNSTABLE'} (${elementCount} elements, ${buttonCount} buttons)`);
+    return isStable;
+    
+  } catch (error) {
+    console.warn('DOM stability check failed:', error);
+    return false;
+  }
+}
+
+/**
+ * Validate element before clicking
+ */
+async function validateElement(element: any, page: Page): Promise<{ isValid: boolean; reason: string }> {
+  try {
+    // Check if element is still attached to DOM
+    const isAttached = await element.isIntersectingViewport();
+    if (!isAttached) {
+      return { isValid: false, reason: 'Element not in viewport' };
+    }
+    
+    // Check element properties
+    const elementInfo = await element.evaluate((el: HTMLElement) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      
+      return {
+        isVisible: rect.width > 0 && rect.height > 0 && 
+                   style.display !== 'none' && 
+                   style.visibility !== 'hidden' &&
+                   style.opacity !== '0',
+        isClickable: !(el as HTMLButtonElement).disabled && style.pointerEvents !== 'none',
+        tagName: el.tagName.toLowerCase(),
+        ariaLabel: el.getAttribute('aria-label') || '',
+        textContent: el.textContent?.trim() || ''
+      };
+    });
+    
+    if (!elementInfo.isVisible) {
+      return { isValid: false, reason: 'Element not visible' };
+    }
+    
+    if (!elementInfo.isClickable) {
+      return { isValid: false, reason: 'Element not clickable' };
+    }
+    
+    if (elementInfo.tagName !== 'button') {
+      return { isValid: false, reason: 'Element is not a button' };
+    }
+    
+    return { isValid: true, reason: `Valid button: "${elementInfo.ariaLabel || elementInfo.textContent}"` };
+    
+  } catch (error) {
+    return { isValid: false, reason: `Validation error: ${error}` };
+  }
 }
 
 function getModernSelectors(buttonType: string): string[] {

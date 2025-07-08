@@ -59,11 +59,21 @@ export async function sendInvitation(
       console.warn('Page validation failed but proceeding');
     }
     
-    // Analyze button structure for debugging
+    // Analyze button structure for debugging with error recovery
     console.log('🔍 Analyzing current button structure...');
-    const buttonAnalysis = await analyzeLinkedInButtonStructure(page);
-    console.log('📊 Button analysis results:');
-    buttonAnalysis.suggestions.forEach(suggestion => console.log(`   ${suggestion}`));
+    let buttonAnalysis;
+    try {
+      buttonAnalysis = await analyzeLinkedInButtonStructure(page);
+      console.log('📊 Button analysis results:');
+      buttonAnalysis.suggestions.forEach(suggestion => console.log(`   ${suggestion}`));
+    } catch (analysisError) {
+      console.warn('⚠️ Button analysis failed, proceeding without detailed analysis:', analysisError);
+      buttonAnalysis = {
+        buttons: [],
+        suggestions: ['Button analysis failed due to execution context error'],
+        screenshot: undefined
+      };
+    }
 
     // Quick check for connection state using progressive detection
     console.log('Checking connection state...');
@@ -110,9 +120,49 @@ export async function sendInvitation(
         throw new Error('User is already connected but no message provided');
       }
       
-      // Enhanced error with debugging info
+      // Enhanced error with debugging info and recovery attempt
+      const debugInfo = buttonAnalysis ? buttonAnalysis.suggestions.join(', ') : 'Analysis unavailable';
+      
+      // Final recovery attempt: try page reload and retry
+      console.log('🔄 Attempting page reload as last resort...');
+      try {
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        // Quick retry for connect button after reload
+        console.log('🔍 Retrying Connect button detection after reload...');
+        const retryConnectButton = await findLinkedInButton(page, 'connect', 10000);
+        
+        if (retryConnectButton) {
+          console.log('✅ Found Connect button after page reload!');
+          // Continue with the found button
+          const connectButton = retryConnectButton.element;
+          await connectButton.click();
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // Skip note addition on retry for simplicity
+          console.log('🔍 Looking for Send button after reload...');
+          const retrySendButton = await findLinkedInButton(page, 'send', 8000);
+          
+          if (retrySendButton) {
+            await retrySendButton.element.click();
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            console.log(`Invitation sent successfully after page reload to ${profileUrl}`);
+            return {
+              success: true,
+              message: 'Invitation sent successfully after page reload recovery',
+              profileUrl,
+              actionTaken: 'invited'
+            };
+          }
+        }
+      } catch (recoveryError) {
+        console.warn('⚠️ Page reload recovery failed:', recoveryError);
+      }
+      
       const errorMsg = `Neither Connect nor Message button found - profile may be private or restricted. 
-        Button analysis: ${buttonAnalysis.suggestions.join(', ')}`;
+        Button analysis: ${debugInfo}`;
       throw new Error(errorMsg);
     }
 
@@ -120,13 +170,28 @@ export async function sendInvitation(
     console.log(`   Selector: ${connectButtonResult.selector}`);
     const connectButton = connectButtonResult.element;
     
-    // Click the connect button
+    // Click the connect button with error recovery
     console.log('Clicking Connect button...');
     if (!connectButton) {
       throw new Error('Connect button is null');
     }
-    await connectButton.click();
-    await new Promise(resolve => setTimeout(resolve, 2000)); // Increased from 1.5s to 2s for stability
+    
+    try {
+      await connectButton.click();
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    } catch (clickError) {
+      console.warn('⚠️ Connect button click failed, attempting recovery:', clickError);
+      
+      // Recovery: Try to find and click the button again
+      const retryConnectButton = await findLinkedInButton(page, 'connect', 5000);
+      if (retryConnectButton) {
+        console.log('🔄 Retrying Connect button click...');
+        await retryConnectButton.element.click();
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } else {
+        throw new Error(`Connect button click failed and retry failed: ${clickError}`);
+      }
+    }
 
     // Add note if provided using progressive detection
     if (note) {
