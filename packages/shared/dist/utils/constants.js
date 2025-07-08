@@ -51,29 +51,46 @@ exports.DEFAULT_JOB_OPTIONS = {
     removeOnFail: 50,
 };
 exports.LINKEDIN_SELECTORS = {
-    // Comprehensive Connect Button selectors with enhanced German language support
+    // Comprehensive Connect Button selectors with enhanced 2025 patterns
     CONNECT_BUTTON: [
-        // Primary patterns (2024-2025) - English and German
+        // Primary patterns (2025) - English and German with exact matches
+        'button[aria-label="Connect"], button[aria-label="Vernetzen"], button[aria-label="Verbinden"]',
         'button[aria-label*="Connect"], button[aria-label*="Vernetzen"], button[aria-label*="Verbinden"]',
         'button[data-control-name="connect"]',
         'button[data-test-id*="connect"]',
-        // Profile action buttons area - both languages
+        // Modern 2025 LinkedIn button patterns
+        'button[data-view-name*="connect"]',
+        '[data-urn*="profile"] button[aria-label*="Connect"]',
+        '[data-urn*="profile"] button[aria-label*="Vernetzen"]',
+        'button.artdeco-button--primary[aria-label*="Connect"]',
+        'button.artdeco-button--primary[aria-label*="Vernetzen"]',
+        'button.artdeco-button--secondary[aria-label*="Connect"]',
+        'button.artdeco-button--secondary[aria-label*="Vernetzen"]',
+        // Profile action buttons area - both languages (2025)
         '.pv-s-profile-actions button[aria-label*="Connect"], .pv-s-profile-actions button[aria-label*="Vernetzen"]',
         '.pvs-profile-actions button[aria-label*="Connect"], .pvs-profile-actions button[aria-label*="Vernetzen"]',
         '.profile-actions button[aria-label*="Connect"], .profile-actions button[aria-label*="Vernetzen"]',
-        // Text-based fallbacks with comprehensive German variations
-        'button:has-text("Connect"), button:has-text("Vernetzen"), button:has-text("Verbinden")',
+        '[data-view-name="profile-actions"] button[aria-label*="Connect"]',
+        '[data-view-name="profile-actions"] button[aria-label*="Vernetzen"]',
+        '.pv-top-card__member-action-bar button[aria-label*="Connect"]',
+        '.pv-top-card__member-action-bar button[aria-label*="Vernetzen"]',
+        // Enhanced text-based detection (case insensitive)
+        'button[aria-label*="connect" i], button[aria-label*="vernetzen" i]',
         'button:contains("Connect"), button:contains("Vernetzen"), button:contains("Verbinden")',
-        // Class-based patterns
-        'button.artdeco-button--primary[aria-label*="Connect"], button.artdeco-button--primary[aria-label*="Vernetzen"]',
-        'button.connect-button, button.vernetzen-button',
-        // Generic button search with text content (broader fallback)
-        'button[type="button"]:contains("Connect")',
-        'button[type="button"]:contains("Vernetzen")',
-        'button[type="button"]:contains("Verbinden")',
-        // Attribute contains searches (more flexible)
-        'button[aria-label]:contains("Connect")',
-        'button[aria-label]:contains("Vernetzen")',
+        // Span and text content search within buttons
+        'button span:contains("Connect"), button span:contains("Vernetzen")',
+        'button span[aria-hidden]:contains("Connect"), button span[aria-hidden]:contains("Vernetzen")',
+        // More specific button group patterns
+        '.artdeco-button-group button[aria-label*="Connect"]',
+        '.artdeco-button-group button[aria-label*="Vernetzen"]',
+        // Action button containers with modern patterns
+        '[role="main"] button[aria-label*="Connect"]',
+        '[role="main"] button[aria-label*="Vernetzen"]',
+        'section[aria-label*="profile" i] button[aria-label*="Connect"]',
+        'section[aria-label*="profile" i] button[aria-label*="Vernetzen"]',
+        // Fallback patterns for edge cases
+        'button[type="button"][aria-label*="Connect"]',
+        'button[type="button"][aria-label*="Vernetzen"]',
         'button[title*="Connect"], button[title*="Vernetzen"]'
     ].join(', '),
     // Enhanced Note Button selectors with comprehensive German support

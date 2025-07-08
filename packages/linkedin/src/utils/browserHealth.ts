@@ -1209,31 +1209,77 @@ export async function validateProfilePage(page: Page): Promise<{ isValid: boolea
     // Use safe evaluation with timeout protection instead of complex page.evaluate
     const validation = await Promise.race([
       safeEvaluate(page, () => {
-        // Quick essential validation only - simplified to prevent execution context destruction
-        const profileHeader = document.querySelector('.pv-top-card, .pvs-header, .profile-topcard');
+        // Enhanced 2025 LinkedIn profile detection with comprehensive selectors
+        
+        // Modern profile header selectors (2025)
+        const profileHeaderSelectors = [
+          '.pv-top-card', '.pvs-header', '.profile-topcard', // Legacy selectors
+          '[data-view-name="profile-topcard"]', // Data attribute approach
+          '.artdeco-card.pv-top-card', // More specific legacy
+          '.profile-photo-edit__edit-btn', // Profile edit area indicator
+          '.pv-text-details__left-panel', // Profile details panel
+          '.mt2.relative', // Common profile container pattern
+          '[data-test-id="profile-top-card"]', // Test ID approach
+          'section[aria-label*="profile"]', // Semantic approach
+          '.profile-topcard-basic-info__name', // Name section
+        ];
+        
+        // Try multiple header detection strategies
+        let profileHeader = null;
+        for (const selector of profileHeaderSelectors) {
+          profileHeader = document.querySelector(selector);
+          if (profileHeader) break;
+        }
+        
+        // Enhanced profile actions detection (2025)
+        const profileActionsSelectors = [
+          '.pv-s-profile-actions', '.pvs-profile-actions', '.profile-actions', // Legacy
+          '[data-view-name="profile-actions"]', // Data attribute
+          '.pv-top-card__member-action-bar', // Action bar area
+          '.artdeco-button-group', // Button group containers
+          '.pv-profile-section__actions', // Profile section actions
+          '[data-test-id="profile-actions"]', // Test ID
+          '.profile-topcard__connections', // Connection area
+        ];
+        
+        let profileActions = null;
+        for (const selector of profileActionsSelectors) {
+          profileActions = document.querySelector(selector);
+          if (profileActions) break;
+        }
+        
+        // Basic validation checks
         const hasButtons = document.querySelectorAll('button').length > 0;
         const isProfileUrl = window.location.href.includes('/in/');
         const hasName = !!document.querySelector('h1');
         
-        // Simple confidence scoring
+        // Enhanced confidence scoring with more indicators
         let confidence = 0;
-        if (profileHeader) confidence += 0.4;
-        if (hasButtons) confidence += 0.3;
-        if (isProfileUrl) confidence += 0.2;
+        if (profileHeader) confidence += 0.3;
+        if (profileActions) confidence += 0.3;
+        if (hasButtons) confidence += 0.2;
+        if (isProfileUrl) confidence += 0.1;
         if (hasName) confidence += 0.1;
         
-        const isValid = confidence >= 0.5;
+        // Bonus confidence for LinkedIn-specific elements
+        if (document.querySelector('[data-urn*="profile"]')) confidence += 0.1;
+        if (document.querySelector('.profile-photo-edit, .pv-top-card-profile-picture')) confidence += 0.1;
+        
+        const isValid = confidence >= 0.4; // Slightly lower threshold for flexibility
         
         return {
           isValid,
-          strategy: 'simplified',
+          strategy: 'enhanced-2025',
           confidence,
           details: {
             hasProfileHeader: !!profileHeader,
+            hasProfileActions: !!profileActions,
             hasButtons,
             isProfileUrl,
             hasName,
-            buttonCount: document.querySelectorAll('button').length
+            buttonCount: document.querySelectorAll('button').length,
+            foundHeaderSelector: profileHeader ? 'found' : 'none',
+            foundActionsSelector: profileActions ? 'found' : 'none'
           }
         };
       }, 2000), // 2 second max evaluation time
@@ -1352,11 +1398,44 @@ export async function analyzePageStructure(page: Page): Promise<any> {
         ).length
       };
       
-      // LinkedIn-specific structure analysis
+      // Enhanced LinkedIn-specific structure analysis (2025)
+      const profileHeaderSelectors = [
+        '.pv-top-card', '.pvs-header', '.profile-topcard', // Legacy
+        '[data-view-name="profile-topcard"]', '.artdeco-card.pv-top-card',
+        '.profile-photo-edit__edit-btn', '.pv-text-details__left-panel',
+        '.mt2.relative', '[data-test-id="profile-top-card"]',
+        'section[aria-label*="profile"]', '.profile-topcard-basic-info__name'
+      ];
+      
+      const profileActionsSelectors = [
+        '.pv-s-profile-actions', '.pvs-profile-actions', '.profile-actions', // Legacy
+        '[data-view-name="profile-actions"]', '.pv-top-card__member-action-bar',
+        '.artdeco-button-group', '.pv-profile-section__actions',
+        '[data-test-id="profile-actions"]', '.profile-topcard__connections'
+      ];
+      
+      // Test each selector and track which ones work
+      let foundHeaderSelector = '';
+      let foundActionsSelector = '';
+      
+      for (const selector of profileHeaderSelectors) {
+        if (document.querySelector(selector)) {
+          foundHeaderSelector = selector;
+          break;
+        }
+      }
+      
+      for (const selector of profileActionsSelectors) {
+        if (document.querySelector(selector)) {
+          foundActionsSelector = selector;
+          break;
+        }
+      }
+      
       const linkedinStructure = {
         hasGlobalNav: !!document.querySelector('.global-nav'),
-        hasProfileHeader: !!document.querySelector('.pv-top-card, .pvs-header, .profile-topcard'),
-        hasProfileActions: !!document.querySelector('.pv-s-profile-actions, .pvs-profile-actions, .profile-actions'),
+        hasProfileHeader: !!foundHeaderSelector,
+        hasProfileActions: !!foundActionsSelector,
         hasMainContent: !!document.querySelector('main'),
         profileName: document.querySelector('.text-heading-xlarge, .pv-text-details__left-panel h1, .top-card-layout__title')?.textContent?.trim() || '',
         hasErrorIndicators: !!(
@@ -1364,7 +1443,15 @@ export async function analyzePageStructure(page: Page): Promise<any> {
           document.body.textContent?.includes('rate limit') ||
           document.body.textContent?.includes('too many requests') ||
           document.querySelector('.auth-wall, .login-form')
-        )
+        ),
+        // Enhanced debugging info
+        foundHeaderSelector,
+        foundActionsSelector,
+        hasProfilePhoto: !!document.querySelector('.profile-photo-edit, .pv-top-card-profile-picture'),
+        hasProfileUrn: !!document.querySelector('[data-urn*="profile"]'),
+        pageType: window.location.pathname.includes('/in/') ? 'profile' : 'other',
+        hasArtdecoButtons: document.querySelectorAll('.artdeco-button').length,
+        hasDataViewElements: document.querySelectorAll('[data-view-name]').length
       };
       
       // JavaScript and network status

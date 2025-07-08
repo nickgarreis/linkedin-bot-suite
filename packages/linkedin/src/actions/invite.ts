@@ -99,21 +99,36 @@ export async function sendInvitation(
           continue;
         }
         
-        // Step 2: Simplified profile validation with recovery
-        console.log('Running simplified profile validation...');
+        // Step 2: Enhanced profile validation with graceful fallback
+        console.log('Running enhanced profile validation...');
         const profileValidation = await validateProfilePage(page);
         
+        console.log(`Profile validation result: valid=${profileValidation.isValid}, confidence=${profileValidation.confidence}, strategy=${profileValidation.strategy}`);
+        
+        // Graceful fallback strategy based on confidence levels
         if (!profileValidation.isValid) {
-          if (profileValidation.confidence < 0.3 && validationAttempts >= maxValidationAttempts) {
-            console.log('Running final page analysis before failing...');
+          if (profileValidation.confidence < 0.2 && validationAttempts >= maxValidationAttempts) {
+            // Very low confidence - likely not a profile page
+            console.log('Running detailed page analysis before failing...');
+            const analysis = await analyzePageStructure(page);
+            console.log('Page analysis results:', JSON.stringify(analysis, null, 2));
+            throw new Error(`Profile page validation failed - very low confidence (${profileValidation.confidence}) after ${validationAttempts} attempts`);
+          } else if (profileValidation.confidence < 0.2) {
+            console.warn('Very low confidence validation, retrying...');
+            await new Promise(resolve => setTimeout(resolve, 3000)); // Longer wait for page to load
+            continue;
+          } else if (profileValidation.confidence < 0.4 && validationAttempts >= maxValidationAttempts) {
+            // Medium confidence - might be a profile page, try to proceed with caution
+            console.warn(`⚠️ Low confidence profile validation (${profileValidation.confidence}) but attempting to proceed...`);
+            console.log('Running page analysis for debugging...');
             await analyzePageStructure(page);
-            throw new Error(`Profile page validation failed - insufficient confidence (${profileValidation.confidence}) after ${validationAttempts} attempts`);
-          } else if (profileValidation.confidence < 0.3) {
-            console.warn('Low confidence validation, retrying...');
+            // Continue with execution but add extra validation later
+          } else if (profileValidation.confidence < 0.4) {
+            console.warn('Low confidence validation, retrying once more...');
             await new Promise(resolve => setTimeout(resolve, 2000));
             continue;
           } else {
-            console.warn(`Low confidence (${profileValidation.confidence}) but proceeding...`);
+            console.warn(`⚠️ Medium confidence (${profileValidation.confidence}) but proceeding...`);
           }
         } else {
           console.log(`✅ Profile validated successfully (confidence: ${profileValidation.confidence})`);
