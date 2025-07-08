@@ -1,6 +1,6 @@
 import { Page } from 'puppeteer';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
-import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady, linkedInTyping, getActivityPattern, resetSessionState, waitForLinkedInPageLoad, waitForProfilePageReady, analyzePageStructure, validateProfilePage, waitForPageStability, monitorPageStability, optimizeMemoryUsage, smartHumanDelay } from '../utils/browserHealth';
+import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady, linkedInTyping, getActivityPattern, resetSessionState, waitForLinkedInPageLoad, waitForProfilePageReady, analyzePageStructure, validateProfilePage, waitForPageStability, monitorPageStability, optimizeMemoryUsage, smartHumanDelay, recoverFromBigpipeStuck, safeEvaluate } from '../utils/browserHealth';
 import { sendMessage } from './message';
 
 export async function sendInvitation(
@@ -152,20 +152,33 @@ export async function sendInvitation(
       }
     }
 
-    // Fast-track page stability monitoring instead of slow human behavior simulation
-    console.log('Monitoring page stability for degradation...');
-    const stabilityResult = await monitorPageStability(page, { 
-      maxDegradationChecks: 2, // Reduced from 3 for speed
-      degradationThreshold: 0.6, // Allow 40% degradation before flagging
-      checkInterval: 1000 // Reduced from 2s to 1s
-    });
+    // Skip aggressive page stability monitoring to prevent context destruction
+    console.log('Using lightweight element check instead of stability monitoring...');
     
-    if (stabilityResult.degradationDetected) {
-      console.warn(`⚠️ Page degradation detected (${stabilityResult.elementCount} elements remaining), proceeding with caution...`);
-      // Optimize memory to help with degraded pages
-      await optimizeMemoryUsage(page);
-    } else {
-      console.log('✅ Page stability confirmed, proceeding with full confidence');
+    // Simple element existence check with human-like delay
+    const elementCheckDelay = 500 + Math.random() * 1500; // 500-2000ms random delay
+    await new Promise(resolve => setTimeout(resolve, elementCheckDelay));
+    
+    let hasBasicElements = false;
+    try {
+      const basicCheck = await safeEvaluate(page, () => ({
+        hasButtons: document.querySelectorAll('button').length > 0,
+        hasMainContent: !!document.querySelector('main, .scaffold-layout__main'),
+        elementCount: document.querySelectorAll('*').length
+      }), 2000);
+      
+      hasBasicElements = basicCheck && typeof basicCheck === 'object' && 
+                        'hasButtons' in basicCheck && basicCheck.hasButtons && 
+                        'hasMainContent' in basicCheck && basicCheck.hasMainContent && 
+                        'elementCount' in basicCheck && basicCheck.elementCount > 200;
+      
+      if (hasBasicElements) {
+        console.log('✅ Basic page elements confirmed, proceeding');
+      } else {
+        console.warn('⚠️ Limited page elements detected, but proceeding with caution');
+      }
+    } catch (error) {
+      console.warn('Element check failed, proceeding anyway:', (error as Error).message);
     }
     
     // Smart connection state detection with auto-fallback to messaging
@@ -175,7 +188,7 @@ export async function sendInvitation(
     try {
       const messageSelectors = LINKEDIN_SELECTORS.MESSAGE_BUTTON.split(', ');
       await waitForButtonWithMultipleSelectors(page, messageSelectors, { 
-        timeout: stabilityResult.degradationDetected ? 1500 : 2000, // Reduced timeout if degraded
+        timeout: hasBasicElements ? 2000 : 1500, // Adaptive timeout based on page elements
         visible: true 
       });
       isAlreadyConnected = true;
@@ -217,7 +230,7 @@ export async function sendInvitation(
         'button:has-text("Pending"), button:has-text("Ausstehend")'
       ];
       await waitForButtonWithMultipleSelectors(page, pendingSelectors, { 
-        timeout: stabilityResult.degradationDetected ? 1000 : 2000, // Reduced timeout if degraded
+        timeout: hasBasicElements ? 2000 : 1000, // Adaptive timeout based on page elements
         visible: true 
       });
       throw new Error('Invitation already pending - cannot send duplicate invitation');
@@ -242,16 +255,17 @@ export async function sendInvitation(
     
     console.log(`Found ${preSearchAnalysis.buttonAnalysis.totalButtons} total buttons, ${preSearchAnalysis.buttonAnalysis.connectButtons} Connect buttons, ${preSearchAnalysis.buttonAnalysis.messageButtons} Message buttons`);
     
-    // Stage 2: Reduced wait for faster execution
+    // Stage 2: Human-like wait with randomization
     console.log('Stage 2: Brief wait for button stability...');
-    await new Promise(resolve => setTimeout(resolve, stabilityResult.degradationDetected ? 500 : 1000)); // Reduced wait
+    const buttonWait = hasBasicElements ? (500 + Math.random() * 1000) : (300 + Math.random() * 500); // Human-like timing
+    await new Promise(resolve => setTimeout(resolve, buttonWait));
     
     // Stage 3: Enhanced Connect button search with multiple strategies
     console.log('Stage 3: Searching for Connect button with enhanced patterns...');
     try {
       const connectSelectors = LINKEDIN_SELECTORS.CONNECT_BUTTON.split(', ');
       connectButton = await waitForButtonWithMultipleSelectors(page, connectSelectors, {
-        timeout: stabilityResult.degradationDetected ? 8000 : 12000, // Reduced from 20s, adaptive based on page state
+        timeout: hasBasicElements ? 10000 : 6000, // Adaptive timeout based on page elements
         visible: true,
         enabled: true
       });

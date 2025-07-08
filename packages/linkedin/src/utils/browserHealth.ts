@@ -22,7 +22,75 @@ export async function enforceRequestSpacing(): Promise<void> {
 }
 
 /**
+ * Recovery function for stuck BIGPIPE rendering with scroll triggers and reload
+ */
+export async function recoverFromBigpipeStuck(page: Page, maxWaitTime: number = 10000): Promise<boolean> {
+  console.log('Attempting to recover from stuck BIGPIPE rendering...');
+  
+  const startTime = Date.now();
+  
+  try {
+    // Try scrolling to trigger lazy loading
+    console.log('Triggering scroll to activate lazy loading...');
+    await page.evaluate(() => {
+      window.scrollTo(0, 100);
+      setTimeout(() => window.scrollTo(0, 200), 500);
+      setTimeout(() => window.scrollTo(0, 0), 1000);
+    });
+    
+    // Wait for scroll effects
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Check if BIGPIPE completed after scroll
+    const state = await safeEvaluate(page, () => ({
+      hasBigpipe: document.body?.className?.includes('render-mode-BIGPIPE') || false,
+      readyState: document.readyState,
+      elementCount: document.querySelectorAll('*').length,
+      buttonCount: document.querySelectorAll('button').length
+    }), 3000);
+    
+    if (state && typeof state === 'object' && 'hasBigpipe' in state && !state.hasBigpipe) {
+      console.log('✅ BIGPIPE completed after scroll trigger');
+      return true;
+    }
+    
+    if (state && typeof state === 'object' && 'elementCount' in state && 'buttonCount' in state && 
+        typeof state.elementCount === 'number' && typeof state.buttonCount === 'number' &&
+        state.elementCount > 400 && state.buttonCount > 5) {
+      console.log('✅ Page has sufficient content despite BIGPIPE - proceeding');
+      return true;
+    }
+    
+    // Try page reload as last resort if we have time
+    if (Date.now() - startTime < maxWaitTime - 5000) {
+      console.warn('Attempting page reload to recover from BIGPIPE stuck...');
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Check if reload helped
+      const postReloadState = await safeEvaluate(page, () => ({
+        hasBigpipe: document.body?.className?.includes('render-mode-BIGPIPE') || false,
+        elementCount: document.querySelectorAll('*').length
+      }), 2000);
+      
+      if (postReloadState && typeof postReloadState === 'object' && 
+          ('hasBigpipe' in postReloadState && !postReloadState.hasBigpipe || 
+           ('elementCount' in postReloadState && typeof postReloadState.elementCount === 'number' && postReloadState.elementCount > 300))) {
+        console.log('✅ Page reload resolved BIGPIPE issue');
+        return true;
+      }
+    }
+    
+  } catch (error) {
+    console.error('BIGPIPE recovery failed:', (error as Error).message);
+  }
+  
+  return false;
+}
+
+/**
  * Monitor page stability and detect degradation (BIGPIPE stuck, element loss)
+ * DEPRECATED: Use lightweight checks instead to prevent context destruction
  */
 export async function monitorPageStability(
   page: Page, 
@@ -1211,15 +1279,21 @@ export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'pro
     console.warn('Body element timeout, continuing...');
   }
   
-  // Enhanced BIGPIPE handling with bot detection countermeasures
+  // Enhanced BIGPIPE handling with stuck detection and recovery
   console.log('Waiting for LinkedIn BIGPIPE rendering to complete...');
   let bigpipeComplete = false;
+  let bigpipeStuckCount = 0;
+  const maxStuckChecks = 5; // User's insight: limit stuck checks
   const bigpipeStartTime = Date.now();
   let bigpipeAttempts = 0;
-  const maxBigpipeAttempts = 20; // Increased attempts for slower LinkedIn responses
+  const maxBigpipeAttempts = 15; // Reduced for faster execution
   
-  while (!bigpipeComplete && bigpipeAttempts < maxBigpipeAttempts && (Date.now() - bigpipeStartTime) < 15000) {
+  while (!bigpipeComplete && bigpipeAttempts < maxBigpipeAttempts && (Date.now() - bigpipeStartTime) < 12000) { // Reduced timeout
     try {
+      // Add human-like delay before evaluation to avoid bot detection
+      const evaluationDelay = 500 + Math.random() * 1000; // 500-1500ms random delay
+      await new Promise(resolve => setTimeout(resolve, evaluationDelay));
+      
       const pageState = await safeEvaluate(page, () => {
         return {
           bodyClasses: document.body?.className || '',
@@ -1227,9 +1301,12 @@ export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'pro
           readyState: document.readyState,
           url: window.location.href,
           title: document.title,
-          totalElements: document.querySelectorAll('*').length
+          totalElements: document.querySelectorAll('*').length,
+          hasBigpipe: document.body?.className?.includes('render-mode-BIGPIPE') || false,
+          hasContent: !!document.querySelector('main, .scaffold-layout__main'),
+          buttonCount: document.querySelectorAll('button').length
         };
-      }, 2000); // Increased timeout for evaluation
+      }, 3000); // Increased timeout for evaluation
       
       if (pageState && typeof pageState === 'object' && 'url' in pageState) {
         const state = pageState as {
@@ -1239,6 +1316,9 @@ export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'pro
           url: string;
           title: string;
           totalElements: number;
+          hasBigpipe: boolean;
+          hasContent: boolean;
+          buttonCount: number;
         };
         
         // Check for auth issues first (LinkedIn bot detection response)
@@ -1252,8 +1332,33 @@ export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'pro
           console.warn('⚠️ Minimal page detected - LinkedIn may be serving degraded content (bot detection)');
         }
         
+        // Check if BIGPIPE is stuck (user's insight: stuck detection)
+        if (state.hasBigpipe && state.readyState === 'loading') {
+          bigpipeStuckCount++;
+          console.warn(`⚠️ BIGPIPE appears stuck (${bigpipeStuckCount}/${maxStuckChecks})`);
+          
+          // User's insight: proceed if stuck but has content
+          if (bigpipeStuckCount >= maxStuckChecks && state.totalElements > 400 && state.hasContent && state.buttonCount > 5) {
+            console.warn('⚠️ BIGPIPE stuck but page has sufficient content - proceeding anyway');
+            bigpipeComplete = true;
+            break;
+          }
+          
+          // Try recovery if stuck for too long
+          if (bigpipeStuckCount >= maxStuckChecks) {
+            console.warn('⚠️ Attempting BIGPIPE recovery...');
+            const recovered = await recoverFromBigpipeStuck(page, 8000);
+            if (recovered) {
+              bigpipeComplete = true;
+              break;
+            }
+          }
+        } else {
+          bigpipeStuckCount = 0; // Reset stuck counter
+        }
+        
         // Check if BIGPIPE is complete
-        if (!state.bodyClasses.includes('render-mode-BIGPIPE')) {
+        if (!state.hasBigpipe) {
           console.log('✅ LinkedIn BIGPIPE rendering completed');
           bigpipeComplete = true;
           break;
@@ -1262,6 +1367,13 @@ export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'pro
         // Alternative success condition: ember app loaded and good content
         if (state.hasEmberApp && state.readyState === 'complete' && state.totalElements > 300) {
           console.log('✅ LinkedIn page loaded (ember app ready)');
+          bigpipeComplete = true;
+          break;
+        }
+        
+        // User's insight: fallback for sufficient content even if BIGPIPE not complete
+        if (state.totalElements > 500 && state.hasContent && state.buttonCount > 5) {
+          console.log('✅ LinkedIn page loaded with sufficient content');
           bigpipeComplete = true;
           break;
         }
@@ -1279,9 +1391,21 @@ export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'pro
       const delay = Math.min(500 + (bigpipeAttempts * 100), 1500);
       await new Promise(resolve => setTimeout(resolve, delay));
     } catch (error) {
-      console.warn('BIGPIPE check failed:', (error as Error).message);
+      const errorMsg = (error as Error).message;
+      
+      // User's insight: handle context destruction during BIGPIPE check
+      if (errorMsg.includes('Execution context was destroyed') || 
+          errorMsg.includes('Target closed') ||
+          errorMsg.includes('Session closed')) {
+        console.warn('⚠️ Context destroyed during BIGPIPE check - page may be reloading');
+        // Don't count this as an attempt, wait longer for page to settle
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        continue;
+      }
+      
+      console.warn('BIGPIPE check failed:', errorMsg);
       bigpipeAttempts++;
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
   }
   
