@@ -2004,8 +2004,7 @@ export async function analyzeLinkedInButtonStructure(page: Page): Promise<{
     let screenshot: string | undefined;
     try {
       if (buttonAnalysis.length > 0) {
-        screenshot = await page.screenshot({
-          type: 'jpeg',
+        screenshot = await page.screenshot({ 
           encoding: 'base64',
           clip: { x: 0, y: 0, width: 800, height: 600 }, // Smaller screenshot
           quality: 50 // Lower quality to reduce memory
@@ -2032,6 +2031,7 @@ export async function analyzeLinkedInButtonStructure(page: Page): Promise<{
   }
 }
 
+
 /**
  * Progressive button detection with comprehensive fallback strategies
  */
@@ -2049,10 +2049,55 @@ export async function findLinkedInButton(
   
   console.log(`🔍 Progressive search for ${buttonType} button (timeout: ${timeout}ms)`);
   
-  // First, check DOM stability before button detection
-  const domStable = await checkDOMStability(page);
-  if (!domStable) {
-    console.warn('⚠️ DOM appears unstable, proceeding with caution');
+  // First, wait for page stability before button detection
+  const pageStable = await waitForPageStability(page, 1000, 8000);
+  if (!pageStable) {
+    console.warn('⚠️ Page stability timeout, proceeding with caution');
+  }
+  
+  // Phase 1: Profile action targeting for connect/message buttons
+  if (buttonType === 'connect' || buttonType === 'message') {
+    console.log(`🎯 Phase 1: Profile-specific targeting for ${buttonType} button`);
+    
+    const profileSelectors = getProfileActionSelectors(buttonType);
+    
+    for (const selector of profileSelectors) {
+      try {
+        const element = await page.waitForSelector(selector, { 
+          timeout: 2000,
+          visible: true 
+        });
+        
+        if (element) {
+          // Validate it's not in messaging overlay
+          const isInMessagingOverlay = await element.evaluate((el) => {
+            return el.closest('.msg-overlay-bubble-header, .msg-overlay-list-bubble, .msg-overlay-conversation-bubble') !== null;
+          });
+          
+          if (!isInMessagingOverlay) {
+            // Additional validation
+            const elementValidation = await validateElement(element, page);
+            if (elementValidation.isValid) {
+              console.log(`✅ Found ${buttonType} button in profile actions: ${selector}`);
+              return {
+                element,
+                strategy: 'profile-actions',
+                confidence: 0.95,
+                selector
+              };
+            } else {
+              console.warn(`⚠️ Profile button failed validation: ${elementValidation.reason}`);
+            }
+          } else {
+            console.warn(`⚠️ Skipping button in messaging overlay: ${selector}`);
+          }
+        }
+      } catch (e) {
+        // Continue to next selector
+      }
+    }
+    
+    console.log(`❌ Profile-specific targeting failed for ${buttonType}, falling back to generic search`);
   }
   
   // Phase 2: Better page loading wait - LinkedIn needs more time to fully load
@@ -2345,12 +2390,8 @@ async function validateElement(element: any, page: Page): Promise<{ isValid: boo
                    style.display !== 'none' && 
                    style.visibility !== 'hidden' &&
                    style.opacity !== '0',
-        isClickable: !(
-          (el as any).disabled ||
-          el.getAttribute('aria-disabled') === 'true'
-        ) && style.pointerEvents !== 'none',
+        isClickable: !(el as HTMLButtonElement).disabled && style.pointerEvents !== 'none',
         tagName: el.tagName.toLowerCase(),
-        role: el.getAttribute('role') || '',
         ariaLabel: el.getAttribute('aria-label') || '',
         textContent: el.textContent?.trim() || ''
       };
@@ -2364,13 +2405,11 @@ async function validateElement(element: any, page: Page): Promise<{ isValid: boo
       return { isValid: false, reason: 'Element not clickable' };
     }
     
-    // Allow modern LinkedIn controls that are not <button>
-    const allowedTags = ['button', 'div', 'span', 'a'];
-    if (!allowedTags.includes(elementInfo.tagName) && elementInfo.role !== 'button') {
-      return { isValid: false, reason: `Unsupported tag: ${elementInfo.tagName} (role: ${elementInfo.role})` };
+    if (elementInfo.tagName !== 'button') {
+      return { isValid: false, reason: 'Element is not a button' };
     }
     
-    return { isValid: true, reason: `Valid element: ${elementInfo.tagName}[role="${elementInfo.role}"] "${elementInfo.ariaLabel || elementInfo.textContent}"` };
+    return { isValid: true, reason: `Valid button: "${elementInfo.ariaLabel || elementInfo.textContent}"` };
     
   } catch (error) {
     return { isValid: false, reason: `Validation error: ${error}` };
@@ -2622,7 +2661,7 @@ function getFuzzySelectors(buttonType: string): string[] {
 }
 
 /**
- * Phase 2: Text-based fallback - iterate over all elements for text matching
+ * Phase 2: Text-based fallback - simple CSS approach to avoid context destruction
  */
 async function findButtonByTextContent(page: Page, buttonType: string): Promise<{element: any, selector: string} | null> {
   console.log(`🔍 Text-based fallback: searching for ${buttonType} button by text content...`);
@@ -2630,94 +2669,94 @@ async function findButtonByTextContent(page: Page, buttonType: string): Promise<
   const buttonTexts = getButtonTexts(buttonType);
   
   try {
-    // Set button texts in page context before evaluation
-    await page.evaluate((texts) => {
-      (window as any).buttonTexts = texts;
-    }, buttonTexts);
+    // Use simple CSS selector approach instead of complex evaluation to avoid context destruction
+    const elements = await page.$$('button, [role="button"], a[onclick], [tabindex="0"]');
     
-    const result = await safeEvaluate(page, () => {
-      // Get button texts from the outer scope
-      const texts = (window as any).buttonTexts;
-      
-      // Search through all clickable elements
-      const clickableElements = document.querySelectorAll('button, [role="button"], a, [onclick], [tabindex]');
-      
-      for (const element of clickableElements) {
-        if (!(element instanceof HTMLElement)) continue;
-        
-        // Check if element is visible
-        const rect = element.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) continue;
-        
-        const style = window.getComputedStyle(element);
-        if (style.display === 'none' || style.visibility === 'hidden') continue;
-        
-        // Check text content
-        const textContent = element.textContent?.trim() || '';
-        const innerText = element.innerText?.trim() || '';
-        
-        for (const text of texts) {
-          if (textContent.toLowerCase().includes(text.toLowerCase()) || 
-              innerText.toLowerCase().includes(text.toLowerCase())) {
-            
-            // Return element info that can be used to find it again
-            return {
-              tagName: element.tagName.toLowerCase(),
-              className: element.className,
-              id: element.id,
-              textContent: textContent,
-              ariaLabel: element.getAttribute('aria-label'),
-              dataControlName: element.getAttribute('data-control-name'),
-              xpath: getXPathTo(element)
-            };
-          }
-        }
-      }
-      
-      return null;
-      
-      // Helper function to get XPath to element
-      function getXPathTo(element: Element): string {
-        if (element.id !== '') {
-          return `//*[@id="${element.id}"]`;
-        }
-        if (element === document.body) {
-          return '/html/body';
-        }
-        
-        let ix = 0;
-        const siblings = element.parentNode?.childNodes || [];
-        for (let i = 0; i < siblings.length; i++) {
-          const sibling = siblings[i];
-          if (sibling === element) {
-            const tagName = element.tagName.toLowerCase();
-            return getXPathTo(element.parentElement!) + '/' + tagName + '[' + (ix + 1) + ']';
-          }
-          if (sibling.nodeType === 1 && (sibling as Element).tagName === element.tagName) {
-            ix++;
-          }
-        }
-        return '';
-      }
-    }, 8000);
+    console.log(`🔍 Found ${elements.length} potential elements for text matching`);
     
-    if (result && typeof result === 'object' && 'xpath' in result) {
-      // Try to find the element using the XPath
-      const elements = await (page as any).$x(result.xpath);
-      if (elements.length > 0) {
-        console.log(`✅ Text-based fallback found button: "${result.textContent}" at ${result.xpath}`);
-        return {
-          element: elements[0],
-          selector: result.xpath
-        };
+    for (const element of elements) {
+      try {
+        // Check if element is visible first
+        const isVisible = await element.isIntersectingViewport();
+        if (!isVisible) continue;
+        
+        // Get text content and aria-label safely
+        const text = await element.evaluate((el) => el.textContent?.trim().toLowerCase() || '');
+        const ariaLabel = await element.evaluate((el) => el.getAttribute('aria-label')?.toLowerCase() || '');
+        
+        // Check if text matches any button text
+        const matchesText = buttonTexts.some(btnText => 
+          text.includes(btnText.toLowerCase()) || 
+          ariaLabel.includes(btnText.toLowerCase())
+        );
+        
+        if (matchesText) {
+          console.log(`✅ Text-based match found: "${text || ariaLabel}"`);
+          return { 
+            element, 
+            selector: `text-based:${text || ariaLabel}` 
+          };
+        }
+      } catch (elementError) {
+        // Element may have been detached, continue to next
+        continue;
       }
     }
     
+    console.log(`❌ No text-based matches found for ${buttonType}`);
     return null;
+    
   } catch (error) {
     console.warn('Text-based fallback failed:', error);
     return null;
   }
+}
+
+/**
+ * Get profile action selectors to target the correct button containers
+ */
+function getProfileActionSelectors(buttonType: string): string[] {
+  // Focus on profile action areas to avoid messaging overlay
+  const profileActionContainers = [
+    '.pv-top-card-v2-ctas',
+    '.pvs-profile-actions', 
+    '.pv-s-profile-actions',
+    '.profile-actions',
+    '.pv-top-card__actions',
+    '[data-view-name="profile-actions"]',
+    'section[data-member-id] .mt2'
+  ];
+  
+  const selectors: string[] = [];
+  
+  switch (buttonType) {
+    case 'connect':
+      profileActionContainers.forEach(container => {
+        selectors.push(
+          `${container} button[aria-label*="Connect"]`,
+          `${container} button[aria-label*="Vernetzen"]`,
+          `${container} div[role="button"][aria-label*="Connect"]`,
+          `${container} div[role="button"][aria-label*="Vernetzen"]`,
+          `${container} span[role="button"][aria-label*="Connect"]`,
+          `${container} span[role="button"][aria-label*="Vernetzen"]`
+        );
+      });
+      break;
+    case 'message':
+      profileActionContainers.forEach(container => {
+        selectors.push(
+          `${container} button[aria-label*="Message"]`,
+          `${container} button[aria-label*="Nachricht"]`,
+          `${container} div[role="button"][aria-label*="Message"]`,
+          `${container} div[role="button"][aria-label*="Nachricht"]`,
+          `${container} span[role="button"][aria-label*="Message"]`,
+          `${container} span[role="button"][aria-label*="Nachricht"]`
+        );
+      });
+      break;
+  }
+  
+  return selectors;
 }
 
 /**
@@ -2806,7 +2845,7 @@ async function captureFailureScreenshot(page: Page, buttonType: string): Promise
   
   try {
     const screenshot = await page.screenshot({
-      type: 'jpeg',
+      type: 'png',
       encoding: 'base64',
       fullPage: false, // Just visible area for smaller size
       quality: 60 // Reduced quality for smaller file size
@@ -2835,13 +2874,14 @@ async function captureFailureScreenshot(page: Page, buttonType: string): Promise
 function getButtonTexts(buttonType: string): string[] {
   switch (buttonType) {
     case 'connect':
-      return ['Connect', 'Vernetzen', 'Verbinden'];
+      return ['Connect', 'Vernetzen', 'Verbinden', 'Connect with', 'Kontakt knüpfen'];
     case 'message':
-      return ['Message', 'Nachricht', 'Nachrichten'];
+      // Focus on profile message buttons, not messaging overlay
+      return ['Message', 'Send a message', 'Nachricht senden', 'Send message', 'Nachricht'];
     case 'send':
-      return ['Send', 'Senden', 'Send invite', 'Einladung senden'];
+      return ['Send', 'Senden', 'Send invite', 'Einladung senden', 'Send now', 'Jetzt senden'];
     case 'note':
-      return ['Add a note', 'Notiz', 'Add note', 'Notiz hinzufügen'];
+      return ['Add a note', 'Notiz', 'Add note', 'Notiz hinzufügen', 'Personal note', 'Persönliche Notiz'];
     default:
       return [];
   }
