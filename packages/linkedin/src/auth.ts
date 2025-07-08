@@ -360,8 +360,44 @@ export async function initLinkedInContext(
         continue;
       }
       
-      // Wait for redirects and content to settle
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Monitor for redirects with URL stability checking
+      console.log('Monitoring page stability for 3 seconds...');
+      const startTime = Date.now();
+      let monitoringError: Error | null = null;
+      
+      while (Date.now() - startTime < 3000) {
+        try {
+          const currentPageUrl = page.url();
+          
+          // Check for Chrome error pages during monitoring
+          if (currentPageUrl.startsWith('chrome-error://') || 
+              currentPageUrl.includes('chromewebdata') || 
+              currentPageUrl.startsWith('chrome://')) {
+            monitoringError = new Error(`Page redirected to Chrome error during monitoring: ${currentPageUrl}`);
+            break;
+          }
+          
+          // Check for LinkedIn login redirects during monitoring  
+          if (currentPageUrl.includes('/login') || currentPageUrl.includes('/authwall')) {
+            monitoringError = new Error(`Page redirected to login/authwall during monitoring: ${currentPageUrl}`);
+            break;
+          }
+          
+          // Small delay between checks
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+        } catch (monitorError) {
+          console.warn('Error during page monitoring:', monitorError);
+          break;
+        }
+      }
+      
+      // If monitoring detected an error, throw it to trigger retry logic
+      if (monitoringError) {
+        throw monitoringError;
+      }
+      
+      console.log('Page monitoring completed successfully');
       
       // Check if page is still healthy after navigation with retry logic
       let postNavHealthy = false;
