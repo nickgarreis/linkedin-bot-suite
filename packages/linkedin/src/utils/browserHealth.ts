@@ -958,6 +958,263 @@ export async function linkedInTyping(page: Page, text: string, context: 'message
 }
 
 /**
+ * Enhanced LinkedIn page loading validation with comprehensive content detection
+ */
+export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'profile' | 'feed' | 'search' = 'profile', timeout: number = 30000): Promise<boolean> {
+  const startTime = Date.now();
+  console.log(`Waiting for LinkedIn ${expectedPageType} page to load completely...`);
+  
+  while (Date.now() - startTime < timeout) {
+    try {
+      const pageState = await page.evaluate((pageType) => {
+        // Check basic page structure
+        const hasGlobalNav = !!document.querySelector('.global-nav');
+        const hasMainContent = !!document.querySelector('main');
+        const bodyClasses = document.body?.className || '';
+        
+        // Check for LinkedIn error states
+        const hasErrorPage = !!document.querySelector('.error-page, .not-found-page');
+        const hasLoginWall = !!document.querySelector('.auth-wall, .login-form');
+        const hasRateLimitError = document.body.textContent?.includes('rate limit') || 
+                                 document.body.textContent?.includes('too many requests');
+        
+        // Page-specific validations
+        let pageSpecificCheck = false;
+        let profileData = null;
+        
+        if (pageType === 'profile') {
+          // Profile page specific checks
+          const profileHeader = document.querySelector('.pv-top-card, .pvs-header, .profile-topcard');
+          const profileActions = document.querySelector('.pv-s-profile-actions, .pvs-profile-actions, .profile-actions');
+          const profileName = document.querySelector('.text-heading-xlarge, .pv-text-details__left-panel h1, .top-card-layout__title')?.textContent?.trim();
+          
+          pageSpecificCheck = !!(profileHeader && profileActions);
+          profileData = {
+            hasProfileHeader: !!profileHeader,
+            hasProfileActions: !!profileActions,
+            profileName: profileName || '',
+            buttonsFound: document.querySelectorAll('button').length
+          };
+        } else if (pageType === 'feed') {
+          // Feed page specific checks
+          pageSpecificCheck = !!document.querySelector('.feed-container, .scaffold-layout__content');
+        }
+        
+        // JavaScript execution check
+        const jsWorking = typeof window.navigator !== 'undefined' && 
+                         typeof document.querySelector !== 'undefined';
+        
+        // Network connectivity check
+        const hasNetworkContent = document.querySelectorAll('img[src*="media.licdn"], img[src*="static.licdn"]').length > 0;
+        
+        return {
+          hasGlobalNav,
+          hasMainContent,
+          hasErrorPage,
+          hasLoginWall,
+          hasRateLimitError,
+          pageSpecificCheck,
+          profileData,
+          jsWorking,
+          hasNetworkContent,
+          bodyClasses,
+          totalElements: document.querySelectorAll('*').length,
+          totalButtons: document.querySelectorAll('button').length,
+          readyState: document.readyState,
+          currentUrl: window.location.href,
+          timestamp: Date.now()
+        };
+      }, expectedPageType);
+      
+      // Log detailed page state for debugging
+      console.log('LinkedIn page state:', {
+        readyState: pageState.readyState,
+        totalElements: pageState.totalElements,
+        totalButtons: pageState.totalButtons,
+        hasGlobalNav: pageState.hasGlobalNav,
+        hasMainContent: pageState.hasMainContent,
+        pageSpecificCheck: pageState.pageSpecificCheck,
+        jsWorking: pageState.jsWorking,
+        hasNetworkContent: pageState.hasNetworkContent
+      });
+      
+      if (pageState.profileData) {
+        console.log('Profile page data:', pageState.profileData);
+      }
+      
+      // Check for error conditions first
+      if (pageState.hasErrorPage) {
+        throw new Error('LinkedIn error page detected');
+      }
+      
+      if (pageState.hasLoginWall) {
+        throw new Error('LinkedIn login wall detected - authentication failed');
+      }
+      
+      if (pageState.hasRateLimitError) {
+        throw new Error('LinkedIn rate limit detected');
+      }
+      
+      // Check for successful page load
+      const isLoaded = pageState.hasGlobalNav && 
+                      pageState.hasMainContent && 
+                      pageState.pageSpecificCheck && 
+                      pageState.jsWorking &&
+                      pageState.totalElements > 100 && // Minimum DOM complexity
+                      pageState.totalButtons > 0; // At least some buttons
+      
+      if (isLoaded) {
+        console.log(`✅ LinkedIn ${expectedPageType} page loaded successfully`);
+        return true;
+      }
+      
+      // If not loaded yet, wait and retry
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+    } catch (error) {
+      console.warn('Page loading check failed:', (error as Error).message);
+      throw error;
+    }
+  }
+  
+  console.warn(`⚠️ LinkedIn ${expectedPageType} page loading timeout after ${timeout}ms`);
+  return false;
+}
+
+/**
+ * Enhanced profile page readiness detection with German language support
+ */
+export async function waitForProfilePageReady(page: Page, timeout: number = 25000): Promise<boolean> {
+  console.log('Waiting for LinkedIn profile page to be fully ready...');
+  
+  try {
+    // First ensure basic page loading
+    const pageLoaded = await waitForLinkedInPageLoad(page, 'profile', timeout);
+    if (!pageLoaded) {
+      return false;
+    }
+    
+    // Additional profile-specific readiness checks
+    const isReady = await page.evaluate(() => {
+      // Wait for profile actions to be fully loaded
+      const profileActions = document.querySelector('.pv-s-profile-actions, .pvs-profile-actions, .profile-actions');
+      if (!profileActions) return false;
+      
+      // Check for Connect/Message buttons (English and German)
+      const connectButton = document.querySelector('button[aria-label*="Connect"], button[aria-label*="Vernetzen"]');
+      const messageButton = document.querySelector('button[aria-label*="Message"], button[aria-label*="Nachricht"]');
+      const pendingButton = document.querySelector('button[aria-label*="Pending"], button[aria-label*="Ausstehend"]');
+      
+      const hasActionButton = !!(connectButton || messageButton || pendingButton);
+      
+      // Check for profile content loading
+      const profileContent = document.querySelector('.pv-profile-section, .pvs-list, .profile-section');
+      
+      // Check for any LinkedIn loading indicators
+      const hasLoadingIndicator = !!document.querySelector('.loader, .loading, [aria-label*="Loading"]');
+      
+      return hasActionButton && !!profileContent && !hasLoadingIndicator;
+    });
+    
+    if (isReady) {
+      console.log('✅ Profile page is fully ready for interaction');
+      return true;
+    } else {
+      console.warn('⚠️ Profile page loaded but not fully ready for interaction');
+      return false;
+    }
+    
+  } catch (error) {
+    console.error('Profile page readiness check failed:', (error as Error).message);
+    return false;
+  }
+}
+
+/**
+ * Enhanced page analysis with comprehensive DOM structure logging
+ */
+export async function analyzePageStructure(page: Page): Promise<any> {
+  try {
+    const analysis = await page.evaluate(() => {
+      // Basic page info
+      const pageInfo = {
+        url: window.location.href,
+        title: document.title,
+        readyState: document.readyState,
+        totalElements: document.querySelectorAll('*').length,
+        bodyClasses: document.body?.className || ''
+      };
+      
+      // Button analysis with more detail
+      const allButtons = Array.from(document.querySelectorAll('button'));
+      const buttonAnalysis = {
+        totalButtons: allButtons.length,
+        buttonDetails: allButtons.slice(0, 15).map(btn => ({
+          text: btn.textContent?.trim().substring(0, 100) || '',
+          ariaLabel: btn.getAttribute('aria-label') || '',
+          className: btn.className,
+          dataControlName: btn.getAttribute('data-control-name') || '',
+          dataTestId: btn.getAttribute('data-test-id') || '',
+          disabled: btn.disabled,
+          visible: btn.offsetWidth > 0 && btn.offsetHeight > 0,
+          id: btn.id || ''
+        })),
+        connectButtons: allButtons.filter(btn => 
+          btn.textContent?.toLowerCase().includes('connect') ||
+          btn.textContent?.toLowerCase().includes('vernetzen') ||
+          btn.getAttribute('aria-label')?.toLowerCase().includes('connect') ||
+          btn.getAttribute('aria-label')?.toLowerCase().includes('vernetzen')
+        ).length,
+        messageButtons: allButtons.filter(btn => 
+          btn.textContent?.toLowerCase().includes('message') ||
+          btn.textContent?.toLowerCase().includes('nachricht') ||
+          btn.getAttribute('aria-label')?.toLowerCase().includes('message') ||
+          btn.getAttribute('aria-label')?.toLowerCase().includes('nachricht')
+        ).length
+      };
+      
+      // LinkedIn-specific structure analysis
+      const linkedinStructure = {
+        hasGlobalNav: !!document.querySelector('.global-nav'),
+        hasProfileHeader: !!document.querySelector('.pv-top-card, .pvs-header, .profile-topcard'),
+        hasProfileActions: !!document.querySelector('.pv-s-profile-actions, .pvs-profile-actions, .profile-actions'),
+        hasMainContent: !!document.querySelector('main'),
+        profileName: document.querySelector('.text-heading-xlarge, .pv-text-details__left-panel h1, .top-card-layout__title')?.textContent?.trim() || '',
+        hasErrorIndicators: !!(
+          document.querySelector('.error-page, .not-found-page') ||
+          document.body.textContent?.includes('rate limit') ||
+          document.body.textContent?.includes('too many requests') ||
+          document.querySelector('.auth-wall, .login-form')
+        )
+      };
+      
+      // JavaScript and network status
+      const technicalStatus = {
+        jsErrors: (window as any).jsErrors || [],
+        hasImages: document.querySelectorAll('img').length,
+        hasLinkedInAssets: document.querySelectorAll('img[src*="licdn"], script[src*="licdn"], link[href*="licdn"]').length,
+        networkTimestamp: Date.now()
+      };
+      
+      return {
+        pageInfo,
+        buttonAnalysis,
+        linkedinStructure,
+        technicalStatus,
+        timestamp: Date.now()
+      };
+    });
+    
+    console.log('📊 Page structure analysis:', JSON.stringify(analysis, null, 2));
+    return analysis;
+    
+  } catch (error) {
+    console.error('Page analysis failed:', (error as Error).message);
+    return null;
+  }
+}
+
+/**
  * Cleanup user data directory with modern fs.rm and retry logic
  */
 export async function cleanupUserDataDir(userDataDir: string): Promise<void> {

@@ -1,6 +1,6 @@
 import { Page } from 'puppeteer';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
-import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady, linkedInTyping, getActivityPattern, resetSessionState } from '../utils/browserHealth';
+import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady, linkedInTyping, getActivityPattern, resetSessionState, waitForLinkedInPageLoad, waitForProfilePageReady, analyzePageStructure } from '../utils/browserHealth';
 
 export async function sendInvitation(
   page: Page,
@@ -74,11 +74,23 @@ export async function sendInvitation(
   }
 
   try {
-    // Wait for LinkedIn page to be fully ready
-    console.log('Waiting for LinkedIn profile page to be ready...');
-    const pageReady = await waitForLinkedInPageReady(page, 'profile', 20000);
-    if (!pageReady) {
-      console.warn('LinkedIn page readiness timeout, but proceeding with caution');
+    // Enhanced LinkedIn page loading validation
+    console.log('Validating LinkedIn page loading with comprehensive checks...');
+    const pageLoaded = await waitForLinkedInPageLoad(page, 'profile', 30000);
+    if (!pageLoaded) {
+      // If page didn't load properly, analyze the structure for debugging
+      console.log('Page loading failed, analyzing page structure...');
+      await analyzePageStructure(page);
+      throw new Error('LinkedIn profile page failed to load properly');
+    }
+    
+    // Wait for profile page to be fully ready for interaction
+    console.log('Waiting for profile page to be fully ready for interaction...');
+    const profileReady = await waitForProfilePageReady(page, 25000);
+    if (!profileReady) {
+      console.warn('Profile page readiness check failed, analyzing current state...');
+      await analyzePageStructure(page);
+      console.warn('Proceeding with caution despite readiness issues...');
     }
 
     // Simulate human behavior on the profile page
@@ -119,50 +131,65 @@ export async function sendInvitation(
       // Continue if pending button not found (good - means no pending invitation)
     }
 
-    // Enhanced Connect button discovery with multiple patterns
-    console.log('Looking for Connect button with enhanced discovery...');
+    // Multi-stage Connect button discovery with comprehensive analysis
+    console.log('Starting multi-stage Connect button discovery...');
     let connectButton;
     
+    // Stage 1: Comprehensive page analysis first
+    console.log('Stage 1: Analyzing page structure before button search...');
+    const preSearchAnalysis = await analyzePageStructure(page);
+    
+    if (!preSearchAnalysis || preSearchAnalysis.buttonAnalysis.totalButtons === 0) {
+      throw new Error('No buttons found on page - page may not have loaded properly or profile is inaccessible');
+    }
+    
+    console.log(`Found ${preSearchAnalysis.buttonAnalysis.totalButtons} total buttons, ${preSearchAnalysis.buttonAnalysis.connectButtons} Connect buttons, ${preSearchAnalysis.buttonAnalysis.messageButtons} Message buttons`);
+    
+    // Stage 2: Wait for buttons to be rendered and stable
+    console.log('Stage 2: Waiting for buttons to be stable...');
+    await new Promise(resolve => setTimeout(resolve, humanDelay(2000, 50)));
+    
+    // Stage 3: Enhanced Connect button search with multiple strategies
+    console.log('Stage 3: Searching for Connect button with enhanced patterns...');
     try {
       const connectSelectors = LINKEDIN_SELECTORS.CONNECT_BUTTON.split(', ');
       connectButton = await waitForButtonWithMultipleSelectors(page, connectSelectors, {
-        timeout: 15000,
+        timeout: 20000, // Increased timeout
         visible: true,
         enabled: true
       });
+      
+      console.log('✅ Connect button found successfully');
+      
     } catch (error: any) {
-      // Enhanced error reporting with page analysis
-      const currentUrl = page.url();
-      const pageTitle = await page.title();
+      console.error('Connect button search failed, running final analysis...');
       
-      // Try to get more debugging info about the page state
-      const pageAnalysis = await page.evaluate(() => {
-        const allButtons = Array.from(document.querySelectorAll('button'));
-        const buttonInfo = allButtons.slice(0, 10).map(btn => ({
-          text: btn.textContent?.trim().substring(0, 50) || '',
-          ariaLabel: btn.getAttribute('aria-label') || '',
-          className: btn.className,
-          dataControlName: btn.getAttribute('data-control-name') || ''
-        }));
-
-        return {
-          totalButtons: allButtons.length,
-          buttonSample: buttonInfo,
-          profileActions: !!document.querySelector('.pv-s-profile-actions, .pvs-profile-actions, .profile-actions'),
-          hasProfileHeader: !!document.querySelector('.pv-top-card, .pvs-header'),
-          isLinkedInProfile: window.location.pathname.includes('/in/')
-        };
-      });
+      // Stage 4: Final comprehensive analysis for debugging
+      const finalAnalysis = await analyzePageStructure(page);
       
-      console.error('Enhanced Connect button search failed:', {
-        currentUrl,
-        pageTitle,
+      console.error('Final button search analysis:', {
         profileUrl,
-        pageAnalysis,
+        currentUrl: page.url(),
+        pageTitle: await page.title(),
+        preSearchButtons: preSearchAnalysis.buttonAnalysis.totalButtons,
+        finalButtons: finalAnalysis?.buttonAnalysis.totalButtons || 0,
+        connectButtonsFound: finalAnalysis?.buttonAnalysis.connectButtons || 0,
+        messageButtonsFound: finalAnalysis?.buttonAnalysis.messageButtons || 0,
+        profileStructure: finalAnalysis?.linkedinStructure || {},
+        buttonDetails: finalAnalysis?.buttonAnalysis.buttonDetails || [],
         originalError: error.message
       });
       
-      throw new Error('Connect button not found - user may already be connected, profile is private, or page failed to load properly');
+      // Provide more specific error messages based on analysis
+      if (finalAnalysis?.buttonAnalysis.messageButtons > 0) {
+        throw new Error('User is already connected - Message button found instead of Connect button');
+      } else if (finalAnalysis?.linkedinStructure.hasErrorIndicators) {
+        throw new Error('LinkedIn error detected - profile may be unavailable or rate limited');
+      } else if (!finalAnalysis?.linkedinStructure.hasProfileActions) {
+        throw new Error('Profile actions section not found - profile may be private or restricted');
+      } else {
+        throw new Error(`Connect button not found after comprehensive search - found ${finalAnalysis?.buttonAnalysis.totalButtons || 0} total buttons, but no Connect button available`);
+      }
     }
     
     // Click the found connect button directly

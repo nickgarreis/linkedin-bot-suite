@@ -70,13 +70,13 @@ export async function initLinkedInContext(
   const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
   console.log('Using user agent:', randomUserAgent);
   
-  // ULTRA-MINIMAL Chrome configuration to prevent protocol errors
+  // Enhanced Chrome configuration optimized for LinkedIn compatibility
   const launchOptions: any = {
     headless: 'new',
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
     protocolTimeout: 300000, // 5 minutes timeout
     args: [
-      // ABSOLUTE MINIMAL Chrome args to prevent protocol errors
+      // Essential container security
       '--no-sandbox',
       '--disable-setuid-sandbox', 
       '--disable-dev-shm-usage',
@@ -85,9 +85,30 @@ export async function initLinkedInContext(
       // User data (required)
       `--user-data-dir=${userDataDir}`,
       
-      // Minimal anti-detection (no complex emulation)
+      // Enable JavaScript features needed for LinkedIn
+      '--enable-javascript',
+      '--enable-web-security',
+      '--allow-running-insecure-content',
+      
+      // Network and rendering for dynamic content
+      '--disable-web-security', // Temporary for debugging
+      '--disable-features=VizDisplayCompositor',
+      '--disable-ipc-flooding-protection',
+      '--enable-features=NetworkService',
+      
+      // Memory and performance
+      '--memory-pressure-off',
+      '--no-default-browser-check',
       '--no-first-run',
       '--disable-default-apps',
+      '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
+      '--disable-backgrounding-occluded-windows',
+      
+      // Display and interaction
+      '--window-size=1366,768',
+      '--disable-extensions',
+      '--disable-plugins',
       
       ...(proxy ? [`--proxy-server=${proxy}`] : [])
     ]
