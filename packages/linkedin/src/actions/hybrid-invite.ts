@@ -16,6 +16,8 @@ export async function sendHybridInvitation(
 ): Promise<{ success: boolean; message: string; profileUrl: string; actionTaken: 'invited' | 'messaged'; method: 'graphql' | 'dom' }> {
   
   console.log('🚀 Starting hybrid invitation system...');
+  console.log(`🔬 Research mode: ${process.env.LINKEDIN_GRAPHQL_RESEARCH === 'true' ? 'ENABLED' : 'DISABLED'}`);
+  console.log(`📊 Advanced diagnostics: ${process.env.LINKEDIN_ADVANCED_DIAGNOSTICS === 'true' ? 'ENABLED' : 'DISABLED'}`);
   
   // Enforce request spacing
   await enforceRequestSpacing();
@@ -38,33 +40,39 @@ export async function sendHybridInvitation(
     const shouldResearch = process.env.LINKEDIN_GRAPHQL_RESEARCH === 'true';
     
     if (shouldResearch) {
-      console.log('🔬 Research mode: Intercepting GraphQL calls...');
-      
-      // Research GraphQL APIs by performing real actions
-      const researchData = await researchLinkedInGraphQL(page, profileUrl, ['invite']);
-      
-      // Log research results
-      console.log('📊 GraphQL Research Results:');
-      console.log(researchData.report);
-      
-      // Save research data for analysis
-      const researchFile = path.join(__dirname, '../../research-data', `graphql-research-${Date.now()}.json`);
+      console.log('🔬 Research mode: Attempting GraphQL research...');
       
       try {
-        // Create directory if it doesn't exist
-        const dir = path.dirname(researchFile);
-        if (!fs.existsSync(dir)) {
-          fs.mkdirSync(dir, { recursive: true });
+        // Research GraphQL APIs by performing real actions
+        const researchData = await researchLinkedInGraphQL(page, profileUrl, ['invite']);
+        
+        // Log research results
+        console.log('📊 GraphQL Research Results:');
+        console.log(researchData.report);
+        
+        // Save research data for analysis
+        const researchFile = path.join(__dirname, '../../research-data', `graphql-research-${Date.now()}.json`);
+        
+        try {
+          // Create directory if it doesn't exist
+          const dir = path.dirname(researchFile);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+          
+          fs.writeFileSync(researchFile, JSON.stringify(researchData, null, 2));
+          console.log(`📁 Research data saved to: ${researchFile}`);
+        } catch (saveError) {
+          console.warn('⚠️ Could not save research data:', saveError);
         }
         
-        fs.writeFileSync(researchFile, JSON.stringify(researchData, null, 2));
-        console.log(`📁 Research data saved to: ${researchFile}`);
-      } catch (saveError) {
-        console.warn('⚠️ Could not save research data:', saveError);
+        // For now, fall back to DOM approach after research
+        console.log('🔄 Research complete, falling back to DOM approach...');
+        
+      } catch (researchError) {
+        console.warn('⚠️ GraphQL research failed:', (researchError as Error).message);
+        console.log('🔄 Continuing with DOM approach...');
       }
-      
-      // For now, fall back to DOM approach after research
-      console.log('🔄 Research complete, falling back to DOM approach...');
       
     } else {
       console.log('🔗 Attempting direct GraphQL API calls...');

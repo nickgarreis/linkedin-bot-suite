@@ -31,6 +31,7 @@ interface InterceptedCall {
 export class LinkedInGraphQLResearcher {
   private interceptedCalls: InterceptedCall[] = [];
   private isIntercepting = false;
+  private interceptionEnabled = false;
 
   /**
    * Start intercepting network requests to capture GraphQL API calls
@@ -43,11 +44,24 @@ export class LinkedInGraphQLResearcher {
     this.isIntercepting = true;
     this.interceptedCalls = [];
 
-    // Enable request interception
-    await page.setRequestInterception(true);
+    // Enable request interception with safety checks
+    try {
+      await page.setRequestInterception(true);
+      this.interceptionEnabled = true;
+      console.log('🔬 Request interception enabled successfully');
+    } catch (error) {
+      console.warn('⚠️ Failed to enable request interception:', (error as Error).message);
+      console.warn('⚠️ GraphQL research will proceed without network interception');
+      this.interceptionEnabled = false;
+      // Continue without interception - we can still perform actions and analyze results
+    }
 
-    // Intercept requests
+    // Intercept requests (only if interception is enabled)
     page.on('request', (request) => {
+      if (!this.interceptionEnabled) {
+        return;
+      }
+
       const url = request.url();
       const method = request.method();
       const headers = request.headers();
@@ -90,12 +104,21 @@ export class LinkedInGraphQLResearcher {
         console.log(`📡 Intercepted ${interceptedCall.type} call: ${interceptedCall.operation || 'unknown'}`);
       }
 
-      // Continue with the request
-      request.continue();
+      // Continue with the request (only if interception is enabled)
+      try {
+        request.continue();
+      } catch (error) {
+        // Request may have already been handled if interception failed
+        console.warn('⚠️ Failed to continue request:', (error as Error).message);
+      }
     });
 
-    // Intercept responses
+    // Intercept responses (only if interception is enabled)
     page.on('response', async (response) => {
+      if (!this.interceptionEnabled) {
+        return;
+      }
+
       const url = response.url();
       const isGraphQL = url.includes('/graphql') || url.includes('/voyager');
 
@@ -136,9 +159,25 @@ export class LinkedInGraphQLResearcher {
       return;
     }
 
-    await page.setRequestInterception(false);
+    // Only try to disable interception if it was enabled
+    if (this.interceptionEnabled) {
+      try {
+        await page.setRequestInterception(false);
+        console.log('🔬 GraphQL interception stopped');
+      } catch (error) {
+        console.warn('⚠️ Failed to disable request interception:', (error as Error).message);
+      }
+    }
+    
     this.isIntercepting = false;
-    console.log('🔬 GraphQL interception stopped');
+    this.interceptionEnabled = false;
+  }
+
+  /**
+   * Check if interception is enabled
+   */
+  isInterceptionEnabled(): boolean {
+    return this.interceptionEnabled;
   }
 
   /**
@@ -222,6 +261,7 @@ export class LinkedInGraphQLResearcher {
     const report = [];
     report.push('=== LinkedIn GraphQL API Research Report ===\n');
     
+    report.push(`Request interception enabled: ${this.interceptionEnabled ? 'Yes' : 'No'}`);
     report.push(`Total intercepted calls: ${this.interceptedCalls.length}`);
     report.push(`Invitation-related calls: ${this.getInvitationCalls().length}`);
     report.push(`Message-related calls: ${this.getMessageCalls().length}\n`);
@@ -302,7 +342,7 @@ export async function researchLinkedInGraphQL(
   const researcher = new LinkedInGraphQLResearcher();
   
   try {
-    // Start intercepting
+    // Start intercepting (with graceful failure handling)
     await researcher.startInterception(page);
     
     // Navigate to profile
@@ -314,6 +354,11 @@ export async function researchLinkedInGraphQL(
     
     // Wait for page to load
     await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Check if interception is working
+    if (!researcher.isInterceptionEnabled()) {
+      console.log('⚠️ Network interception not available - research will analyze button interactions only');
+    }
     
     // Perform actions to trigger GraphQL calls
     for (const action of actions) {
