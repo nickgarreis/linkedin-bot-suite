@@ -14,9 +14,9 @@ This is a LinkedIn bot suite built as a monorepo using pnpm workspaces. The proj
 - `packages/bot-core/` - Core job processing and queue management
 - `packages/linkedin/` - LinkedIn automation actions (invite, message, profile view)
 - `packages/worker/` - Background worker for processing jobs
-- `deployments/` - Render.com deployment configurations
+- `deployments/render/` - Render.com service configurations (render.yaml files)
 - `docs/` - API documentation and integration guides
-- `examples/` - n8n workflow examples and API client samples
+- `examples/n8n-workflows/` - n8n workflow examples
 - `scripts/` - Database schema and utility scripts
 
 ### Key Components
@@ -75,6 +75,9 @@ pnpm run build:api
 pnpm run build:worker
 ```
 
+### Testing
+Currently, no test framework is configured. The project has `"test": "echo \"Error: no test specified\" && exit 1"` in package.json files.
+
 ### Development Servers
 ```bash
 # Run API server in development mode
@@ -107,6 +110,9 @@ pnpm add <package> --filter @linkedin-bot-suite/<package-name>
 
 # Add dev dependency to root
 pnpm add -D <package> -w
+
+# Install with fallback for lockfile issues
+pnpm install --frozen-lockfile || pnpm install
 ```
 
 ## Environment Configuration
@@ -139,9 +145,21 @@ pnpm add -D <package> -w
 - `QUEUE_NAME` - BullMQ queue name (default: linkedin-jobs)
 - `BULLMQ_PREFIX` - BullMQ key prefix (default: bull)
 
+### Key Dependencies
+- **BullMQ**: Job queue system for processing LinkedIn actions
+- **Puppeteer**: Browser automation for LinkedIn interactions
+- **puppeteer-extra-plugin-stealth**: Anti-detection measures for web scraping
+- **Express**: HTTP API server framework
+- **Supabase**: Database and authentication service
+- **Redis (via ioredis)**: Backend for BullMQ job queue
+- **Joi**: Request validation schemas
+- **node-cron**: Scheduled cookie health checks
+- **@solana/wallet-standard-features**: Required for Supabase compatibility
+- **node-fetch v2.7.0**: HTTP client (specific version for compatibility)
+
 ### Dependency Notes
-- `@solana/wallet-standard-features` - Required for Supabase compatibility
 - BullMQ `removeOnComplete`/`removeOnFail` use object format: `{ count: N }`
+- Node-fetch is pinned to v2.7.0 for CommonJS compatibility
 
 ## Database Schema
 
@@ -205,13 +223,13 @@ x-internal-key: your-internal-api-key-here
 - **Environment Variables**: Set via Render API for automatic cookie management
 
 ### Docker Configuration
-**Worker Service Requirements:**
-- Environment: Docker (not Node.js)
-- Dockerfile: Root-level `Dockerfile` with dumb-init for signal handling
-- Base Image: `node:18-slim` (Debian-based)
+**Unified Docker Image:**
+- Single Dockerfile: Root-level `Dockerfile` serves both API and Worker
+- Base Image: `node:18-slim` (Debian-based) 
 - Chrome Installation: Google Chrome Stable via apt-get with stability packages
 - User Management: Creates `nodejs` user with proper home directory
 - Build Process: Runs `build:clean && build` to prevent stale TypeScript declarations
+- Service Selection: Use different CMD for API vs Worker containers
 
 ### Required Services
 1. **API Server** - Node.js web service for n8n integration
@@ -238,13 +256,15 @@ Additional environment variables for Docker Worker:
 - **Build errors**: Ensure dependencies are built first with `pnpm run build`
 - **Type errors**: Check that all workspace packages are properly referenced in tsconfig.json
 - **Docker Chrome issues**: Ensure Worker service uses Docker environment, not Node.js
-- **Render deployment path errors**: Use root-level `Dockerfile` for Worker service
 - **Stale TypeScript declarations**: Run `pnpm run build:clean && pnpm run build` to regenerate .d.ts files
 - **Cross-package type mismatches**: Ensure all packages are rebuilt after interface changes
 - **Chrome permission denied**: Ensure proper home directory creation with `/home/nodejs/.local/share/applications`
 - **Chrome SingletonLock error**: Fixed by using unique user data directories per job instance
 - **Browser "about:blank" errors**: Resolved with comprehensive health checks and proper cleanup
 - **Page "Not attached" errors**: Fixed with browser disconnect handlers and timeout-based cleanup
+
+### Linting & Code Quality
+No linting tools (ESLint, Prettier) are currently configured. Code style follows TypeScript defaults.
 
 ## LinkedIn Automation Notes
 
@@ -697,4 +717,40 @@ render logs -r srv-d1m1udq4d50c738d0630 --type=app --limit=30 -o text | grep -E 
 
 # Force redeployment with cache clear
 echo "y" | render deploys create srv-d1m1udq4d50c738d0630 --clear-cache -o json
+```
+
+## Quick Debug Commands
+
+### Local Development
+```bash
+# Check TypeScript compilation errors
+pnpm run typecheck
+
+# View environment variables
+env | grep -E "(REDIS|SUPABASE|LINKEDIN|JWT)"
+
+# Test Redis connection
+redis-cli -u "$REDIS_URL" ping
+
+# Validate cookies script
+node scripts/validate-cookies.js
+```
+
+### Production Debugging
+```bash
+# View worker logs (latest 50 entries)
+render logs -r srv-d1m1udq4d50c738d0630 --type=app --limit=50 -o text
+
+# View API server logs
+render logs -r srv-d1lv5tripnbc73a6n6e0 --type=app --limit=50 -o text
+
+# Check for specific errors
+render logs -r srv-d1m1udq4d50c738d0630 --type=app --limit=100 -o text | grep -i error
+
+# Monitor real-time logs
+render logs -r srv-d1m1udq4d50c738d0630 --type=app --tail
+
+# SSH into running containers
+render ssh srv-d1m1udq4d50c738d0630  # Worker
+render ssh srv-d1lv5tripnbc73a6n6e0  # API Server
 ```

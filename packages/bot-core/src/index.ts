@@ -1,9 +1,7 @@
 import { Queue, QueueEvents } from 'bullmq';
 import { createClient } from '@supabase/supabase-js';
-import pino from 'pino';
 
-export const log = pino({ name: 'bot-core' });
-log.info(`Worker listening on ${process.env.QUEUE_NAME}`);
+console.log(`[bot-core] Worker listening on ${process.env.QUEUE_NAME}`);
 
 export function initSupabase() {
   return createClient(
@@ -38,7 +36,7 @@ new QueueEvents(queueName, {
   prefix,
   connection: redis,
 }).on('completed', ({ jobId }) => {
-  log.info({ jobId }, 'Job erledigt');
+  console.log(`[bot-core] Job completed: ${jobId}`);
 });
 
 // Export the processor function

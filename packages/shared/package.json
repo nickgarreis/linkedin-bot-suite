@@ -9,10 +9,12 @@
   },
   "dependencies": {
     "joi": "^17.11.0",
-    "pino": "^9.7.0",
-    "@supabase/supabase-js": "^2.50.3"
+    "@supabase/supabase-js": "^2.50.3",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "@types/node": "^24.0.10"
+    "@types/node": "^24.0.10",
+    "@types/uuid": "^9.0.7",
+    "typescript": "^5.8.3"
   }
 }

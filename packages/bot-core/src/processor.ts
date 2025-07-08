@@ -1,5 +1,4 @@
 import { Job } from 'bullmq';
-import { log } from './index';
 import { initLinkedInContext, sendInvitation, sendMessage, viewProfile, checkPageHealth, checkBrowserHealth, cleanupUserDataDir, categorizeError } from '@linkedin-bot-suite/linkedin';
 import { LinkedInJob, JOB_TYPES } from '@linkedin-bot-suite/shared';
 import { WebhookService } from './services/webhookService';
@@ -50,15 +49,7 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
   const startMemory = process.memoryUsage();
   const startTime = Date.now();
   
-  log.info({ 
-    jobId, 
-    type: jobData.type, 
-    memoryUsage: {
-      rss: Math.round(startMemory.rss / 1024 / 1024),
-      heapUsed: Math.round(startMemory.heapUsed / 1024 / 1024),
-      heapTotal: Math.round(startMemory.heapTotal / 1024 / 1024)
-    }
-  }, 'Processing job started');
+  console.log(`[bot-core] Processing job started: ${jobId}, type: ${jobData.type}, memory: ${Math.round(startMemory.rss / 1024 / 1024)}MB RSS`);
 
   try {
     // Update job status to processing
@@ -68,7 +59,7 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
     const jobTimeoutMs = 5 * 60 * 1000; // 5 minutes
     jobTimeout = setTimeout(() => {
       const error = new Error(`Job ${jobId} timed out after ${jobTimeoutMs/1000} seconds`);
-      log.error({ jobId, timeout: jobTimeoutMs }, 'Job timeout');
+      console.error(`[bot-core] Job timeout: ${jobId}, timeout: ${jobTimeoutMs}ms`);
       throw error;
     }, jobTimeoutMs);
 
@@ -180,13 +171,7 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
       heapTotal: Math.round((endMemory.heapTotal - startMemory.heapTotal) / 1024 / 1024)
     };
     
-    log.info({
-      jobId, 
-      type: jobData.type, 
-      profileUrl: jobData.profileUrl,
-      duration: `${duration}ms`,
-      memoryDelta
-    }, 'Job completed successfully');
+    console.log(`[bot-core] Job completed successfully: ${jobId}, type: ${jobData.type}, duration: ${duration}ms, memory delta: +${memoryDelta.rss}MB RSS`);
 
     // Process job completion
     await webhookService.processJobCompletion(jobId, true, result);
@@ -205,15 +190,7 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
     const error = err instanceof Error ? err : new Error('Unknown error');
     const errorCategory = categorizeError(error);
     
-    log.error({ 
-      jobId, 
-      type: jobData.type, 
-      profileUrl: jobData.profileUrl, 
-      errorType: errorCategory.type,
-      recoverable: errorCategory.recoverable,
-      retryable: errorCategory.retryable,
-      error: error.message
-    }, `Job failed: ${errorCategory.description}`);
+    console.error(`[bot-core] Job failed: ${jobId}, type: ${jobData.type}, errorType: ${errorCategory.type}, error: ${error.message}, description: ${errorCategory.description}`);
     
     // Handle different error types
     switch (errorCategory.type) {

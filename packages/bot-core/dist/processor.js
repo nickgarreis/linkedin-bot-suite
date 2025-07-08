@@ -1,7 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.processJob = processJob;
-const index_1 = require("./index");
 const linkedin_1 = require("@linkedin-bot-suite/linkedin");
 const shared_1 = require("@linkedin-bot-suite/shared");
 const webhookService_1 = require("./services/webhookService");
@@ -45,15 +44,7 @@ async function processJob(job) {
     // Memory monitoring
     const startMemory = process.memoryUsage();
     const startTime = Date.now();
-    index_1.log.info({
-        jobId,
-        type: jobData.type,
-        memoryUsage: {
-            rss: Math.round(startMemory.rss / 1024 / 1024),
-            heapUsed: Math.round(startMemory.heapUsed / 1024 / 1024),
-            heapTotal: Math.round(startMemory.heapTotal / 1024 / 1024)
-        }
-    }, 'Processing job started');
+    console.log(`[bot-core] Processing job started: ${jobId}, type: ${jobData.type}, memory: ${Math.round(startMemory.rss / 1024 / 1024)}MB RSS`);
     try {
         // Update job status to processing
         await webhookService.updateJobStatus(jobId, 'processing');
@@ -61,7 +52,7 @@ async function processJob(job) {
         const jobTimeoutMs = 5 * 60 * 1000; // 5 minutes
         jobTimeout = setTimeout(() => {
             const error = new Error(`Job ${jobId} timed out after ${jobTimeoutMs / 1000} seconds`);
-            index_1.log.error({ jobId, timeout: jobTimeoutMs }, 'Job timeout');
+            console.error(`[bot-core] Job timeout: ${jobId}, timeout: ${jobTimeoutMs}ms`);
             throw error;
         }, jobTimeoutMs);
         // Add heartbeat interval to prevent job stalling with enhanced memory monitoring
@@ -156,13 +147,7 @@ async function processJob(job) {
             heapUsed: Math.round((endMemory.heapUsed - startMemory.heapUsed) / 1024 / 1024),
             heapTotal: Math.round((endMemory.heapTotal - startMemory.heapTotal) / 1024 / 1024)
         };
-        index_1.log.info({
-            jobId,
-            type: jobData.type,
-            profileUrl: jobData.profileUrl,
-            duration: `${duration}ms`,
-            memoryDelta
-        }, 'Job completed successfully');
+        console.log(`[bot-core] Job completed successfully: ${jobId}, type: ${jobData.type}, duration: ${duration}ms, memory delta: +${memoryDelta.rss}MB RSS`);
         // Process job completion
         await webhookService.processJobCompletion(jobId, true, result);
     }
@@ -178,15 +163,7 @@ async function processJob(job) {
         }
         const error = err instanceof Error ? err : new Error('Unknown error');
         const errorCategory = (0, linkedin_1.categorizeError)(error);
-        index_1.log.error({
-            jobId,
-            type: jobData.type,
-            profileUrl: jobData.profileUrl,
-            errorType: errorCategory.type,
-            recoverable: errorCategory.recoverable,
-            retryable: errorCategory.retryable,
-            error: error.message
-        }, `Job failed: ${errorCategory.description}`);
+        console.error(`[bot-core] Job failed: ${jobId}, type: ${jobData.type}, errorType: ${errorCategory.type}, error: ${error.message}, description: ${errorCategory.description}`);
         // Handle different error types
         switch (errorCategory.type) {
             case 'authentication_failed':

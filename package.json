@@ -8,7 +8,7 @@
     "build:shared": "pnpm --filter @linkedin-bot-suite/shared build",
     "build:linkedin": "pnpm --filter @linkedin-bot-suite/linkedin build",
     "build:bot-core": "pnpm --filter @linkedin-bot-suite/bot-core build",
-    "build:api": "pnpm run build:clean && pnpm run build:shared && pnpm run build:linkedin && pnpm run build:bot-core && pnpm --filter @linkedin-bot-suite/api-server build && echo 'Build verification:' && cd packages/api-server && ls -la dist/routes/ && echo 'API server build completed successfully'",
+    "build:api": "pnpm --filter @linkedin-bot-suite/api-server build",
     "build:worker": "pnpm --filter @linkedin-bot-suite/worker build",
     "build:clean": "tsc --build --clean",
     "dev:api": "pnpm --filter @linkedin-bot-suite/api-server dev",
@@ -27,13 +27,6 @@
     "packages/*"
   ],
   "devDependencies": {
-    "@types/cors": "^2.8.17",
-    "@types/express": "^4.17.21",
-    "@types/jsonwebtoken": "^9.0.5",
-    "@types/morgan": "^1.9.9",
-    "@types/node": "^24.0.10",
-    "@types/uuid": "^9.0.7",
-    "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
   },
   "dependencies": {
@@ -49,7 +42,6 @@
     "joi": "^17.11.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
-    "pino": "^9.7.0",
     "puppeteer": "^24.11.2",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",

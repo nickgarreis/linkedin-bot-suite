@@ -157,19 +157,18 @@ Store the JSON as a single line in `LINKEDIN_COOKIES_JSON`.
 
 #### Build and Push Images
 ```bash
-# Build API server image
-docker build -f deployments/render/api-server/Dockerfile -t your-registry/linkedin-bot-api .
-docker push your-registry/linkedin-bot-api
-
-# Build worker image  
-docker build -f deployments/render/worker/Dockerfile -t your-registry/linkedin-bot-worker .
-docker push your-registry/linkedin-bot-worker
+# Build single Docker image for both services
+docker build -t your-registry/linkedin-bot-suite .
+docker push your-registry/linkedin-bot-suite
 ```
 
 #### Deploy to Render
-1. Create services using custom Docker images
-2. Use the images you just pushed
-3. Configure environment variables
+1. Create services using the custom Docker image
+2. For API Server:
+   - Use CMD: `["pnpm", "--filter", "@linkedin-bot-suite/api-server", "start"]`
+3. For Worker:
+   - Use CMD: `["pnpm", "--filter", "@linkedin-bot-suite/worker", "start"]`
+4. Configure environment variables for each service
 
 ## Post-Deployment Setup
 
