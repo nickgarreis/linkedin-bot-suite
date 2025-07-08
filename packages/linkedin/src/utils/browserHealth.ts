@@ -2005,6 +2005,7 @@ export async function analyzeLinkedInButtonStructure(page: Page): Promise<{
     try {
       if (buttonAnalysis.length > 0) {
         screenshot = await page.screenshot({ 
+          type: 'jpeg',
           encoding: 'base64',
           clip: { x: 0, y: 0, width: 800, height: 600 }, // Smaller screenshot
           quality: 50 // Lower quality to reduce memory
@@ -2848,7 +2849,7 @@ async function captureFailureScreenshot(page: Page, buttonType: string): Promise
   
   try {
     const screenshot = await page.screenshot({
-      type: 'png',
+      type: 'jpeg',
       encoding: 'base64',
       fullPage: false, // Just visible area for smaller size
       quality: 60 // Reduced quality for smaller file size
