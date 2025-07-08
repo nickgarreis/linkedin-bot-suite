@@ -1110,17 +1110,89 @@ export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'pro
           const hasErrorPage = !!document.querySelector('.error-page, .not-found-page');
           const hasLoginWall = !!document.querySelector('.auth-wall, .login-form');
           
-          // Simplified profile detection for profile pages - essential selectors only
-          const profileHeader = document.querySelector('.pv-top-card, .pvs-header, .profile-topcard, [data-view-name="profile-topcard"]');
-          const profileActions = document.querySelector('.pv-s-profile-actions, .pvs-profile-actions, .profile-actions');
-          const hasButtons = document.querySelectorAll('button').length > 0;
+          // Enhanced 2025 LinkedIn profile detection with comprehensive selectors
           const isProfileUrl = window.location.href.includes('/in/');
           
-          const pageSpecificCheck = isProfileUrl ? (!!profileHeader && hasButtons) : hasMainContent;
+          let profileHeader = null;
+          let profileActions = null;
+          let foundHeaderSelector = '';
+          let foundActionsSelector = '';
+          
+          if (isProfileUrl) {
+            // Modern profile header selectors (2025) - same as validateProfilePage
+            const profileHeaderSelectors = [
+              '.pv-top-card', '.pvs-header', '.profile-topcard', // Legacy selectors
+              '[data-view-name="profile-topcard"]', // Data attribute approach
+              '.artdeco-card.pv-top-card', // More specific legacy
+              '.profile-photo-edit__edit-btn', // Profile edit area indicator
+              '.pv-text-details__left-panel', // Profile details panel
+              '.mt2.relative', // Common profile container pattern
+              '[data-test-id="profile-top-card"]', // Test ID approach
+              'section[aria-label*="profile"]', // Semantic approach
+              '.profile-topcard-basic-info__name', // Name section
+            ];
+            
+            // Enhanced profile actions selectors (2025)
+            const profileActionsSelectors = [
+              '.pv-s-profile-actions', '.pvs-profile-actions', '.profile-actions', // Legacy
+              '[data-view-name="profile-actions"]', // Data attribute
+              '.pv-top-card__member-action-bar', // Action bar area
+              '.artdeco-button-group', // Button group containers
+              '.pv-profile-section__actions', // Profile section actions
+              '[data-test-id="profile-actions"]', // Test ID
+              '.profile-topcard__connections', // Connection area
+            ];
+            
+            // Try multiple header detection strategies
+            for (const selector of profileHeaderSelectors) {
+              profileHeader = document.querySelector(selector);
+              if (profileHeader) {
+                foundHeaderSelector = selector;
+                break;
+              }
+            }
+            
+            // Try multiple actions detection strategies
+            for (const selector of profileActionsSelectors) {
+              profileActions = document.querySelector(selector);
+              if (profileActions) {
+                foundActionsSelector = selector;
+                break;
+              }
+            }
+          }
+          
+          const hasButtons = document.querySelectorAll('button').length > 0;
+          
+          // Enhanced page-specific validation with fallback logic
+          let pageSpecificCheck = false;
+          if (isProfileUrl) {
+            // Primary check: Profile header + buttons
+            if (profileHeader && hasButtons) {
+              pageSpecificCheck = true;
+            }
+            // Fallback check: Profile actions + buttons (in case header selector fails)
+            else if (profileActions && hasButtons) {
+              pageSpecificCheck = true;
+            }
+            // Secondary fallback: Any profile indicators + buttons
+            else if (hasButtons && (
+              document.querySelector('[data-urn*="profile"]') ||
+              document.querySelector('.profile-photo-edit, .pv-top-card-profile-picture') ||
+              document.querySelector('h1') // Profile name
+            )) {
+              pageSpecificCheck = true;
+            }
+          } else {
+            pageSpecificCheck = hasMainContent;
+          }
+          
           const profileData = isProfileUrl ? {
             hasProfileHeader: !!profileHeader,
             hasProfileActions: !!profileActions,
-            buttonCount: document.querySelectorAll('button').length
+            buttonCount: document.querySelectorAll('button').length,
+            foundHeaderSelector,
+            foundActionsSelector
           } : null;
           
           return {
@@ -1171,6 +1243,16 @@ export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'pro
       
       if (pageState.profileData) {
         console.log('Profile page data:', pageState.profileData);
+        // Enhanced debugging: Show which selectors worked
+        if (pageState.profileData.foundHeaderSelector) {
+          console.log(`✅ Profile header found with selector: ${pageState.profileData.foundHeaderSelector}`);
+        }
+        if (pageState.profileData.foundActionsSelector) {
+          console.log(`✅ Profile actions found with selector: ${pageState.profileData.foundActionsSelector}`);
+        }
+        if (!pageState.profileData.hasProfileHeader && !pageState.profileData.hasProfileActions) {
+          console.warn('⚠️ No profile header or actions found with any 2025 selectors');
+        }
       }
       
       // Check for successful page load with reduced requirements
