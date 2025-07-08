@@ -303,10 +303,30 @@ export async function initLinkedInContext(
       // Wait for redirects and content to settle
       await new Promise(resolve => setTimeout(resolve, 3000));
       
-      // Check if page is still healthy after navigation
-      const postNavHealth = await checkPageHealth(page, { checkNavigation: false });
-      if (!postNavHealth.isHealthy) {
-        console.warn(`Post-navigation health check failed: ${postNavHealth.error}`);
+      // Check if page is still healthy after navigation with retry logic
+      let postNavHealthy = false;
+      for (let retryCount = 0; retryCount < 3; retryCount++) {
+        try {
+          const postNavHealth = await checkPageHealth(page, { checkNavigation: false });
+          if (postNavHealth.isHealthy) {
+            postNavHealthy = true;
+            break;
+          } else {
+            console.warn(`Post-navigation health check failed (attempt ${retryCount + 1}/3): ${postNavHealth.error}`);
+            if (retryCount < 2) {
+              await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
+            }
+          }
+        } catch (healthError) {
+          console.warn(`Health check error (attempt ${retryCount + 1}/3):`, healthError);
+          if (retryCount < 2) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
+      }
+      
+      if (!postNavHealthy) {
+        console.warn('Post-navigation health checks failed after 3 attempts, trying next target');
         continue;
       }
       

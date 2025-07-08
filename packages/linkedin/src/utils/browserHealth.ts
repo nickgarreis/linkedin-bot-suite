@@ -150,11 +150,14 @@ export async function checkPageHealth(
         )
       ]);
     } catch (evalError: any) {
-      // Handle common frame detachment errors
+      // Handle common frame detachment and context destruction errors
       if (evalError.message.includes('detached Frame') || 
           evalError.message.includes('Session closed') ||
-          evalError.message.includes('Connection closed')) {
-        result.error = `Frame detached during evaluation: ${evalError.message}`;
+          evalError.message.includes('Connection closed') ||
+          evalError.message.includes('Target closed') ||
+          evalError.message.includes('Execution context was destroyed') ||
+          evalError.message.includes('Protocol error')) {
+        result.error = `Context/Frame issue during evaluation: ${evalError.message}`;
         return result;
       }
       throw evalError;
@@ -343,14 +346,16 @@ export function categorizeError(error: Error): ErrorCategory {
     };
   }
   
-  // Frame detachment issues
+  // Frame detachment and context destruction issues
   if (message.includes('detached frame') || 
-      message.includes('frame') && message.includes('detached')) {
+      message.includes('frame') && message.includes('detached') ||
+      message.includes('execution context was destroyed') ||
+      message.includes('context was destroyed')) {
     return {
       type: 'frame_detached',
       recoverable: true,
       retryable: true,
-      description: 'Page frame became detached during operation'
+      description: 'Page frame or execution context was destroyed during operation'
     };
   }
   

@@ -72,7 +72,7 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
       throw error;
     }, jobTimeoutMs);
 
-    // Add heartbeat interval to prevent job stalling with memory monitoring
+    // Add heartbeat interval to prevent job stalling with enhanced memory monitoring
     heartbeat = setInterval(() => {
       const currentMemory = process.memoryUsage();
       const memoryIncrease = {
@@ -84,9 +84,38 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
       job.updateProgress(50); // Keep job alive
       console.log(`Heartbeat for job ${jobId} - Memory delta: RSS +${memoryIncrease.rss}MB, Heap +${memoryIncrease.heapUsed}MB`);
       
-      // Warn if memory usage is growing too much
-      if (memoryIncrease.rss > 200) { // More than 200MB increase
-        console.warn(`Job ${jobId} using excessive memory: +${memoryIncrease.rss}MB RSS`);
+      // Enhanced memory leak detection and prevention
+      if (memoryIncrease.rss > 300) { // Critical memory usage
+        console.error(`⚠️ CRITICAL: Job ${jobId} using excessive memory: +${memoryIncrease.rss}MB RSS - force terminating job`);
+        throw new Error(`Job terminated due to excessive memory usage: +${memoryIncrease.rss}MB RSS`);
+      } else if (memoryIncrease.rss > 200) { // Warning threshold
+        console.warn(`⚠️ Job ${jobId} using high memory: +${memoryIncrease.rss}MB RSS`);
+        
+        // Force garbage collection if available
+        if (global.gc) {
+          console.log('Running garbage collection...');
+          global.gc();
+        }
+      }
+      
+      // Check browser health if available
+      if (browser && browser.isConnected()) {
+        browser.pages().then(pages => {
+          console.log(`Browser has ${pages.length} pages open`);
+          // Close any extra pages beyond the main one
+          if (pages.length > 2) {
+            console.warn(`Too many browser pages open (${pages.length}), closing extras`);
+            pages.slice(2).forEach(async (extraPage) => {
+              try {
+                if (!extraPage.isClosed()) {
+                  await extraPage.close();
+                }
+              } catch (err) {
+                console.error('Failed to close extra page:', err);
+              }
+            });
+          }
+        }).catch(err => console.error('Failed to check browser pages:', err));
       }
     }, 10000); // Every 10 seconds
 

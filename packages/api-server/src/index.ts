@@ -16,6 +16,9 @@ validateConfig();
 
 const app: express.Application = express();
 
+// Trust proxy for Render.com environment (fixes rate limiting behind proxy)
+app.set('trust proxy', true);
+
 // Security middleware
 app.use(helmet());
 app.use(cors(CONFIG.cors));

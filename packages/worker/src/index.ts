@@ -105,56 +105,44 @@ worker.on('stalled', (jobId) => {
   console.warn(`Job ${jobId} stalled`);
 });
 
-// Redis connection monitoring - using manual Redis client for monitoring
+// Redis connection monitoring - reuse BullMQ connection to reduce connection count
 
-let redisMonitorClient: Redis | null = null;
+let redisMonitorClient: any = null;
 
 async function initRedisMonitoring() {
   try {
-    redisMonitorClient = new Redis(process.env.REDIS_URL!, {
-      maxRetriesPerRequest: 3,
-      connectTimeout: 10000,   // Increased from 5000ms to 10000ms
-      commandTimeout: 10000,   // Increased from 2000ms to 10000ms
-      enableOfflineQueue: false,
-      lazyConnect: false,
-      reconnectOnError: (err: Error) => {
-        console.log('Redis monitor reconnectOnError triggered:', err.message);
-        return err.message.includes('READONLY') || err.message.includes('ECONNRESET');
-      },
-    });
+    // Get the Redis connection from the BullMQ worker to reuse it
+    // This reduces the total number of connections to Redis
+    const workerRedis = await worker.client;
+    redisMonitorClient = workerRedis;
     
-    redisMonitorClient.on('connect', () => {
-      console.log('✅ Redis monitor connected successfully');
-    });
-
-    redisMonitorClient.on('ready', () => {
-      console.log('✅ Redis monitor ready for commands');
-    });
-
-    redisMonitorClient.on('error', (err: Error) => {
-      console.error('❌ Redis monitor connection error:', err.message);
-    });
-
-    redisMonitorClient.on('disconnect', () => {
-      console.warn('⚠️ Redis monitor connection closed');
-    });
-
-    redisMonitorClient.on('reconnecting', () => {
-      console.log('🔄 Redis monitor reconnecting...');
-    });
-
-    // ioredis connects automatically
+    console.log('✅ Redis monitor initialized (reusing BullMQ connection)');
   } catch (error) {
     console.error('Failed to initialize Redis monitoring:', error);
+    // Fallback to separate connection if needed
+    redisMonitorClient = null;
   }
 }
 
 // Initialize Redis monitoring
 initRedisMonitoring();
 
-// Enhanced health check function with detailed diagnostics
+// Enhanced health check function with comprehensive performance monitoring
+let healthCheckStats = {
+  totalChecks: 0,
+  redisFailures: 0,
+  avgRedisPingTime: 0,
+  maxRedisPingTime: 0,
+  peakMemoryUsage: 0,
+  jobsProcessed: 0,
+  jobsCompleted: 0,
+  jobsFailed: 0
+};
+
 async function performHealthCheck() {
   try {
+    healthCheckStats.totalChecks++;
+    
     // Check Redis connection with timeout measurement
     let redisHealthy = false;
     let redisPingTime = 0;
@@ -165,12 +153,18 @@ async function performHealthCheck() {
         await redisMonitorClient.ping();
         redisPingTime = Date.now() - startTime;
         redisHealthy = true;
+        
+        // Update Redis performance stats
+        healthCheckStats.avgRedisPingTime = Math.round((healthCheckStats.avgRedisPingTime + redisPingTime) / 2);
+        healthCheckStats.maxRedisPingTime = Math.max(healthCheckStats.maxRedisPingTime, redisPingTime);
       } catch (pingError) {
+        healthCheckStats.redisFailures++;
         const errorMessage = pingError instanceof Error ? pingError.message : String(pingError);
         console.error('❌ Redis ping failed:', {
           error: errorMessage,
           timestamp: new Date().toISOString(),
-          clientStatus: redisMonitorClient.status
+          clientStatus: redisMonitorClient.status,
+          totalFailures: healthCheckStats.redisFailures
         });
       }
     }
@@ -178,6 +172,10 @@ async function performHealthCheck() {
     // Check worker status and connection health
     const isRunning = !worker.closing;
     const memoryUsage = process.memoryUsage();
+    const currentMemoryMB = Math.round(memoryUsage.rss / 1024 / 1024);
+    
+    // Update memory stats
+    healthCheckStats.peakMemoryUsage = Math.max(healthCheckStats.peakMemoryUsage, currentMemoryMB);
     
     const healthStatus = {
       redis: redisHealthy,
@@ -185,17 +183,39 @@ async function performHealthCheck() {
       activeJobs,
       redisPingTime: redisPingTime > 0 ? `${redisPingTime}ms` : 'N/A',
       memoryUsage: {
-        rss: Math.round(memoryUsage.rss / 1024 / 1024) + 'MB',
-        heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024) + 'MB'
+        rss: currentMemoryMB + 'MB',
+        heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024) + 'MB',
+        peak: healthCheckStats.peakMemoryUsage + 'MB'
+      },
+      performance: {
+        avgRedisPing: healthCheckStats.avgRedisPingTime + 'ms',
+        maxRedisPing: healthCheckStats.maxRedisPingTime + 'ms',
+        redisFailureRate: `${Math.round((healthCheckStats.redisFailures / healthCheckStats.totalChecks) * 100)}%`,
+        jobsProcessed: healthCheckStats.jobsProcessed,
+        jobSuccessRate: healthCheckStats.jobsProcessed > 0 ? 
+          `${Math.round((healthCheckStats.jobsCompleted / healthCheckStats.jobsProcessed) * 100)}%` : 'N/A'
       },
       timestamp: new Date().toISOString()
     };
     
-    console.log(`Health check: Redis ${redisHealthy ? '✅' : '❌'}, Worker ${isRunning ? '✅' : '❌'}, Active jobs: ${activeJobs}, Ping: ${redisPingTime}ms, Memory: ${healthStatus.memoryUsage.rss}`);
+    console.log(`Health check: Redis ${redisHealthy ? '✅' : '❌'}, Worker ${isRunning ? '✅' : '❌'}, Active jobs: ${activeJobs}, Ping: ${redisPingTime}ms, Memory: ${healthStatus.memoryUsage.rss}, Success Rate: ${healthStatus.performance.jobSuccessRate}`);
     
-    // Alert on slow Redis responses
+    // Enhanced alerting based on performance thresholds
     if (redisHealthy && redisPingTime > 5000) {
       console.warn('⚠️ Redis response time is slow:', redisPingTime + 'ms');
+    }
+    
+    if (healthCheckStats.redisFailures / healthCheckStats.totalChecks > 0.1) {
+      console.warn('⚠️ High Redis failure rate:', healthCheckStats.redisFailures, 'failures out of', healthCheckStats.totalChecks, 'checks');
+    }
+    
+    if (currentMemoryMB > 400) {
+      console.warn('⚠️ High memory usage detected:', currentMemoryMB + 'MB');
+    }
+    
+    // Log detailed performance summary every 20 checks (10 minutes)
+    if (healthCheckStats.totalChecks % 20 === 0) {
+      console.log('📊 Performance Summary:', JSON.stringify(healthStatus.performance, null, 2));
     }
     
     return healthStatus;
@@ -221,16 +241,19 @@ let isShuttingDown = false;
 
 worker.on('active', (job) => {
   activeJobs++;
+  healthCheckStats.jobsProcessed++;
   console.log(`Processing job ${job.id}: ${job.data.type} - ${job.data.profileUrl} (Active: ${activeJobs})`);
 });
 
 worker.on('completed', (job, result) => {
   activeJobs--;
+  healthCheckStats.jobsCompleted++;
   console.log(`Job ${job.id} completed successfully (Active: ${activeJobs}):`, result);
 });
 
 worker.on('failed', (job, err) => {
   activeJobs--;
+  healthCheckStats.jobsFailed++;
   console.error(`Job ${job?.id} failed (Active: ${activeJobs}):`, err.message);
 });
 
