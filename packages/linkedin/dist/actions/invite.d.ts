@@ -3,4 +3,5 @@ export declare function sendInvitation(page: Page, profileUrl: string, note?: st
     success: boolean;
     message: string;
     profileUrl: string;
+    actionTaken: 'invited' | 'messaged';
 }>;

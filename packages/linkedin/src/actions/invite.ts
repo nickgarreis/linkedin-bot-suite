@@ -1,12 +1,13 @@
 import { Page } from 'puppeteer';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
 import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady, linkedInTyping, getActivityPattern, resetSessionState, waitForLinkedInPageLoad, waitForProfilePageReady, analyzePageStructure, validateProfilePage, waitForPageStability } from '../utils/browserHealth';
+import { sendMessage } from './message';
 
 export async function sendInvitation(
   page: Page,
   profileUrl: string,
   note?: string
-): Promise<{ success: boolean; message: string; profileUrl: string }> {
+): Promise<{ success: boolean; message: string; profileUrl: string; actionTaken: 'invited' | 'messaged' }> {
   // Check activity patterns and respect business hours
   const activityPattern = getActivityPattern();
   console.log(`Activity pattern: ${activityPattern.isActiveHour ? 'Active' : 'Inactive'} hour (${activityPattern.activityMultiplier}x speed)`);
@@ -155,19 +156,45 @@ export async function sendInvitation(
     console.log('Simulating human behavior...');
     await simulateHumanBehavior(page);
     
-    // Check for already connected state (Message button exists)
+    // Smart connection state detection with auto-fallback to messaging
+    console.log('Checking connection state for smart action selection...');
+    let isAlreadyConnected = false;
+    
     try {
       const messageSelectors = LINKEDIN_SELECTORS.MESSAGE_BUTTON.split(', ');
       await waitForButtonWithMultipleSelectors(page, messageSelectors, { 
         timeout: 3000, 
         visible: true 
       });
-      throw new Error('User is already connected - cannot send invitation');
+      isAlreadyConnected = true;
+      console.log('✅ User is already connected - will send message instead of invitation');
     } catch (error: any) {
-      if (error.message.includes('already connected')) {
-        throw error; // Re-throw if already connected
+      console.log('No message button found - user not connected, proceeding with invitation');
+      // Continue with invitation flow
+    }
+    
+    // If already connected, automatically send message instead
+    if (isAlreadyConnected) {
+      console.log('🔄 Auto-fallback: Sending message to already connected user...');
+      
+      if (!note || note.trim().length === 0) {
+        // Provide a default professional message if no note was provided
+        note = "Hi! I'd love to connect and potentially explore collaboration opportunities.";
+        console.log('Using default message since no note was provided');
       }
-      // Continue if message button not found (good - means not connected)
+      
+      try {
+        const messageResult = await sendMessage(page, profileUrl, note!); // note is guaranteed to be defined here
+        return {
+          success: true,
+          message: `User already connected - message sent successfully: "${note}"`,
+          profileUrl,
+          actionTaken: 'messaged'
+        };
+      } catch (messageError) {
+        console.error('Message fallback failed:', messageError);
+        throw new Error(`User is already connected but message sending failed: ${messageError instanceof Error ? messageError.message : 'Unknown error'}`);
+      }
     }
 
     // Check for pending invitation state
@@ -238,9 +265,26 @@ export async function sendInvitation(
         originalError: error.message
       });
       
-      // Provide more specific error messages based on analysis
+      // Enhanced error handling with smart fallback detection
       if (finalAnalysis?.buttonAnalysis.messageButtons > 0) {
-        throw new Error('User is already connected - Message button found instead of Connect button');
+        console.log('🔄 Connect button not found, but Message buttons detected - attempting message fallback...');
+        
+        if (!note || note.trim().length === 0) {
+          note = "Hi! I'd love to connect and potentially explore collaboration opportunities.";
+          console.log('Using default message since no note was provided for fallback');
+        }
+        
+        try {
+          const messageResult = await sendMessage(page, profileUrl, note!); // note is guaranteed to be defined here
+          return {
+            success: true,
+            message: `Connect button not available but user is connected - message sent successfully: "${note}"`,
+            profileUrl,
+            actionTaken: 'messaged'
+          };
+        } catch (messageError) {
+          throw new Error(`User appears connected but both invitation and messaging failed: ${messageError instanceof Error ? messageError.message : 'Unknown error'}`);
+        }
       } else if (finalAnalysis?.linkedinStructure.hasErrorIndicators) {
         throw new Error('LinkedIn error detected - profile may be unavailable or rate limited');
       } else if (!finalAnalysis?.linkedinStructure.hasProfileActions) {
@@ -288,7 +332,7 @@ export async function sendInvitation(
             await new Promise(resolve => setTimeout(resolve, humanDelay(200, 40))); // Brief pause after selection
             
             // Use LinkedIn-specific typing for note context
-            await linkedInTyping(page, note, 'note', { 
+            await linkedInTyping(page, note!, 'note', { 
               element: noteField
             });
             
@@ -342,6 +386,7 @@ export async function sendInvitation(
       success: true,
       message: note ? 'Invitation with personal note sent successfully' : 'Invitation sent successfully',
       profileUrl,
+      actionTaken: 'invited'
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
