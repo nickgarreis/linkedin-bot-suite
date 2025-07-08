@@ -3,7 +3,7 @@ services:
     name: linkedin-bot-api
     env: node
     plan: starter
-    buildCommand: pnpm install --frozen-lockfile && pnpm -w run build:clean && pnpm -w run build
+    buildCommand: pnpm install --frozen-lockfile && pnpm -w run build:clean && pnpm -w run build:shared && pnpm -w run build:linkedin && pnpm -w run build:bot-core && pnpm -w run build:api && echo "Build verification:" && cd packages/api-server && ls -la dist/routes/ && echo "API server build completed successfully"
     startCommand: pnpm --filter @linkedin-bot-suite/api-server start
     healthCheckPath: /health
     envVars:
