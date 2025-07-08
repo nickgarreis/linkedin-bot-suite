@@ -7,13 +7,20 @@ import { v4 as uuidv4 } from 'uuid';
 const supabase = createClient(CONFIG.supabase.url, CONFIG.supabase.serviceRoleKey);
 
 export class JobService {
-  private queue: Queue;
+  private queue: Queue | null = null;
 
   constructor() {
-    this.queue = new Queue(CONFIG.bullmq.queueName, {
-      connection: { url: CONFIG.redis.url },
-      prefix: CONFIG.bullmq.prefix,
-    });
+    // Lazy initialization - don't connect to Redis until first use
+  }
+
+  private getQueue(): Queue {
+    if (!this.queue) {
+      this.queue = new Queue(CONFIG.bullmq.queueName, {
+        connection: { url: CONFIG.redis.url },
+        prefix: CONFIG.bullmq.prefix,
+      });
+    }
+    return this.queue;
   }
 
   async createJob(jobData: LinkedInJob, clientSlug: string) {
@@ -31,7 +38,7 @@ export class JobService {
     });
 
     // Add job to BullMQ queue
-    const job = await this.queue.add(
+    const job = await this.getQueue().add(
       jobData.type,
       {
         ...jobData,
@@ -96,7 +103,7 @@ export class JobService {
   }
 
   async getJobStatus(jobId: string) {
-    const job = await this.queue.getJob(jobId);
+    const job = await this.getQueue().getJob(jobId);
     const { data: jobHistory } = await supabase
       .from('job_history')
       .select('*')
@@ -146,7 +153,7 @@ export class JobService {
   }
 
   async deleteJob(jobId: string) {
-    const job = await this.queue.getJob(jobId);
+    const job = await this.getQueue().getJob(jobId);
     if (job) {
       await job.remove();
     }
