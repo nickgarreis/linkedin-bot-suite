@@ -1,6 +1,6 @@
 import { Page } from 'puppeteer';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
-import { safeElementInteraction, verifyPageStability, enforceRequestSpacing } from '../utils/browserHealth';
+import { safeElementInteraction, verifyPageStability, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady } from '../utils/browserHealth';
 
 export async function sendMessage(
   page: Page,

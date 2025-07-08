@@ -54,51 +54,96 @@ async function sendInvitation(page, profileUrl, note) {
         throw new Error(`Failed to navigate to profile after trying all strategies. Last error: ${lastError?.message || 'Unknown error'}`);
     }
     try {
-        // Simulate human behavior on the profile page
-        console.log('Simulating human behavior and checking page stability...');
-        await (0, browserHealth_1.simulateHumanBehavior)(page);
-        const stabilityTime = (0, browserHealth_1.humanDelay)(2500, 40); // Variable stability check time
-        const isStable = await (0, browserHealth_1.verifyPageStability)(page, stabilityTime);
-        if (!isStable) {
-            console.warn('Page stability check failed, but proceeding with caution');
+        // Wait for LinkedIn page to be fully ready
+        console.log('Waiting for LinkedIn profile page to be ready...');
+        const pageReady = await (0, browserHealth_1.waitForLinkedInPageReady)(page, 'profile', 20000);
+        if (!pageReady) {
+            console.warn('LinkedIn page readiness timeout, but proceeding with caution');
         }
-        // Check for alternative connection states first using safe evaluation
-        const connectionState = await page.evaluate(() => {
-            const messageBtn = document.querySelector('button[aria-label*="Message"], button[aria-label*="Nachricht"]');
-            const pendingBtn = document.querySelector('button[aria-label*="Pending"], button[aria-label*="Ausstehend"]');
-            const connectBtn = document.querySelector('button[aria-label*="Connect"], button[aria-label*="Vernetzen"]');
-            return {
-                hasMessageButton: !!messageBtn,
-                hasPendingButton: !!pendingBtn,
-                hasConnectButton: !!connectBtn,
-                messageText: messageBtn?.textContent || '',
-                pendingText: pendingBtn?.textContent || '',
-                connectText: connectBtn?.textContent || ''
-            };
-        });
-        if (connectionState.hasMessageButton) {
+        // Simulate human behavior on the profile page
+        console.log('Simulating human behavior...');
+        await (0, browserHealth_1.simulateHumanBehavior)(page);
+        // Check for already connected state (Message button exists)
+        try {
+            const messageSelectors = shared_1.LINKEDIN_SELECTORS.MESSAGE_BUTTON.split(', ');
+            await (0, browserHealth_1.waitForButtonWithMultipleSelectors)(page, messageSelectors, {
+                timeout: 3000,
+                visible: true
+            });
             throw new Error('User is already connected - cannot send invitation');
         }
-        if (connectionState.hasPendingButton) {
+        catch (error) {
+            if (error.message.includes('already connected')) {
+                throw error; // Re-throw if already connected
+            }
+            // Continue if message button not found (good - means not connected)
+        }
+        // Check for pending invitation state
+        try {
+            const pendingSelectors = [
+                'button[aria-label*="Pending"], button[aria-label*="Ausstehend"]',
+                'button[data-control-name*="pending"]',
+                'button:has-text("Pending"), button:has-text("Ausstehend")'
+            ];
+            await (0, browserHealth_1.waitForButtonWithMultipleSelectors)(page, pendingSelectors, {
+                timeout: 3000,
+                visible: true
+            });
             throw new Error('Invitation already pending - cannot send duplicate invitation');
         }
-        if (!connectionState.hasConnectButton) {
+        catch (error) {
+            if (error.message.includes('already pending')) {
+                throw error; // Re-throw if pending
+            }
+            // Continue if pending button not found (good - means no pending invitation)
+        }
+        // Enhanced Connect button discovery with multiple patterns
+        console.log('Looking for Connect button with enhanced discovery...');
+        let connectButton;
+        try {
+            const connectSelectors = shared_1.LINKEDIN_SELECTORS.CONNECT_BUTTON.split(', ');
+            connectButton = await (0, browserHealth_1.waitForButtonWithMultipleSelectors)(page, connectSelectors, {
+                timeout: 15000,
+                visible: true,
+                enabled: true
+            });
+        }
+        catch (error) {
+            // Enhanced error reporting with page analysis
             const currentUrl = page.url();
             const pageTitle = await page.title();
-            console.error('Connect button not found on page:', {
+            // Try to get more debugging info about the page state
+            const pageAnalysis = await page.evaluate(() => {
+                const allButtons = Array.from(document.querySelectorAll('button'));
+                const buttonInfo = allButtons.slice(0, 10).map(btn => ({
+                    text: btn.textContent?.trim().substring(0, 50) || '',
+                    ariaLabel: btn.getAttribute('aria-label') || '',
+                    className: btn.className,
+                    dataControlName: btn.getAttribute('data-control-name') || ''
+                }));
+                return {
+                    totalButtons: allButtons.length,
+                    buttonSample: buttonInfo,
+                    profileActions: !!document.querySelector('.pv-s-profile-actions, .pvs-profile-actions, .profile-actions'),
+                    hasProfileHeader: !!document.querySelector('.pv-top-card, .pvs-header'),
+                    isLinkedInProfile: window.location.pathname.includes('/in/')
+                };
+            });
+            console.error('Enhanced Connect button search failed:', {
                 currentUrl,
                 pageTitle,
                 profileUrl,
-                connectionState
+                pageAnalysis,
+                originalError: error.message
             });
             throw new Error('Connect button not found - user may already be connected, profile is private, or page failed to load properly');
         }
-        // Use safe element interaction for connect button
-        console.log('Connect button found, clicking with safe interaction...');
-        await (0, browserHealth_1.safeElementInteraction)(page, shared_1.LINKEDIN_SELECTORS.CONNECT_BUTTON, async (element) => {
-            await element.click();
-            return true;
-        }, { timeout: 10000, retries: 3 });
+        // Click the found connect button directly
+        console.log('Connect button found, clicking with human-like timing...');
+        await connectButton.click();
+        // Add human-like delay after clicking
+        const clickDelay = (0, browserHealth_1.humanDelay)(1000, 50);
+        await new Promise(resolve => setTimeout(resolve, clickDelay));
         // Wait for invitation modal with human-like timing
         const modalWaitTime = (0, browserHealth_1.humanDelay)(2000, 50); // Variable 1-3 second wait
         await new Promise(resolve => setTimeout(resolve, modalWaitTime));

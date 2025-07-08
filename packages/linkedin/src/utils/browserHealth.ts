@@ -674,3 +674,169 @@ export async function cleanupUserDataDir(userDataDir: string): Promise<void> {
     }
   }
 }
+
+/**
+ * Enhanced button discovery with dynamic content waiting
+ */
+export async function waitForButtonWithMultipleSelectors(
+  page: Page,
+  selectors: string | string[],
+  options: {
+    timeout?: number;
+    pollInterval?: number;
+    visible?: boolean;
+    enabled?: boolean;
+  } = {}
+): Promise<any> {
+  const {
+    timeout = 15000,
+    pollInterval = 500,
+    visible = true,
+    enabled = true
+  } = options;
+
+  const selectorArray = Array.isArray(selectors) ? selectors : [selectors];
+  const startTime = Date.now();
+
+  console.log(`Waiting for button with ${selectorArray.length} selector patterns...`);
+
+  while (Date.now() - startTime < timeout) {
+    try {
+      // Check page health before each attempt
+      if (page.isClosed() || !page.browser().isConnected()) {
+        throw new Error('Page or browser disconnected during button search');
+      }
+
+      // Try each selector pattern
+      for (const selector of selectorArray) {
+        try {
+          // Skip XPath selectors for now (Puppeteer limitation)
+          if (selector.startsWith('//')) {
+            continue;
+          }
+
+          const elements = await page.$$(selector);
+          
+          for (const element of elements) {
+            // Check if element is visible (if required)
+            if (visible) {
+              const isVisible = await element.evaluate((el: Element) => {
+                const rect = el.getBoundingClientRect();
+                const style = window.getComputedStyle(el);
+                return (
+                  rect.width > 0 &&
+                  rect.height > 0 &&
+                  style.visibility !== 'hidden' &&
+                  style.display !== 'none' &&
+                  style.opacity !== '0'
+                );
+              });
+              
+              if (!isVisible) continue;
+            }
+
+            // Check if element is enabled (if required)
+            if (enabled) {
+              const isEnabled = await element.evaluate((el: Element) => {
+                return !(el as HTMLButtonElement).disabled;
+              });
+              
+              if (!isEnabled) continue;
+            }
+
+            // Get element text for debugging
+            const elementText = await element.evaluate((el: Element) => el.textContent?.trim() || '');
+            const elementTag = await element.evaluate((el: Element) => el.tagName);
+            const elementClasses = await element.evaluate((el: Element) => el.className);
+
+            console.log(`Found button: ${elementTag}.${elementClasses} - "${elementText}" with selector: ${selector}`);
+            return element;
+          }
+        } catch (selectorError: any) {
+          // Continue to next selector if this one fails
+          continue;
+        }
+      }
+
+      // Wait before next poll
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+    } catch (error: any) {
+      if (error.message.includes('detached') || error.message.includes('closed')) {
+        throw error;
+      }
+      // Continue polling for other errors
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+  }
+
+  throw new Error(`Button not found after ${timeout}ms with any of ${selectorArray.length} selectors`);
+}
+
+/**
+ * Enhanced page readiness check for LinkedIn pages
+ */
+export async function waitForLinkedInPageReady(
+  page: Page,
+  pageType: 'profile' | 'feed' | 'general' = 'general',
+  timeout: number = 20000
+): Promise<boolean> {
+  console.log(`Waiting for LinkedIn ${pageType} page to be ready...`);
+  
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < timeout) {
+    try {
+      const readiness = await safeEvaluate(page, () => {
+        // Basic readiness checks
+        const basicChecks = {
+          documentReady: document.readyState === 'complete',
+          hasLinkedInClass: document.body?.classList.contains('linkedin') || 
+                           document.documentElement?.classList.contains('linkedin'),
+          hasGlobalNav: !!document.querySelector('nav.global-nav, [data-test-global-nav]'),
+          hasMainContent: !!document.querySelector('main'),
+          noLoadingSpinners: !document.querySelector('.loader, .loading, [data-test-loader]')
+        };
+
+        // Page-specific checks
+        let specificChecks = {};
+        
+        if (window.location.pathname.includes('/in/')) {
+          // Profile page specific checks
+          specificChecks = {
+            hasProfileSection: !!document.querySelector('.pv-top-card, .pvs-header, .profile-photo-edit'),
+            hasActionsSection: !!document.querySelector('.pv-s-profile-actions, .pvs-profile-actions, .profile-actions')
+          };
+        } else if (window.location.pathname.includes('/feed')) {
+          // Feed page specific checks  
+          specificChecks = {
+            hasFeedContainer: !!document.querySelector('.feed-container-theme, .scaffold-finite-scroll')
+          };
+        }
+
+        return { ...basicChecks, ...specificChecks };
+      }) || {};
+
+      // Check if most readiness criteria are met
+      const readinessValues = Object.values(readiness);
+      const readyCount = readinessValues.filter(Boolean).length;
+      const totalChecks = readinessValues.length;
+      
+      if (readyCount >= Math.ceil(totalChecks * 0.7)) { // 70% of checks pass
+        console.log(`LinkedIn page ready: ${readyCount}/${totalChecks} checks passed`);
+        return true;
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+    } catch (error: any) {
+      if (error.message.includes('detached') || error.message.includes('closed')) {
+        throw error;
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+
+  console.warn(`LinkedIn page readiness timeout after ${timeout}ms`);
+  return false;
+}

@@ -48,11 +48,11 @@ export declare const DEFAULT_JOB_OPTIONS: {
     readonly removeOnFail: 50;
 };
 export declare const LINKEDIN_SELECTORS: {
-    readonly CONNECT_BUTTON: "button[aria-label*=\"Connect\"], button[aria-label*=\"Vernetzen\"], button[data-control-name=\"connect\"]";
-    readonly NOTE_BUTTON: "button[aria-label*=\"Add a note\"], button[aria-label*=\"Notiz\"], button[data-control-name=\"add-note\"]";
-    readonly SEND_BUTTON: "button[aria-label*=\"Send invite\"], button[aria-label*=\"Einladung senden\"], button[data-control-name=\"send.invite\"]";
-    readonly MESSAGE_BUTTON: "button[aria-label*=\"Message\"], button[aria-label*=\"Nachricht\"], button[data-control-name=\"message\"]";
-    readonly MESSAGE_TEXTAREA: "div[contenteditable=\"true\"][data-placeholder*=\"message\" i]";
-    readonly SEND_MESSAGE_BUTTON: "button[aria-label*=\"Send\"], button[aria-label*=\"Senden\"], button[data-control-name=\"send\"]";
+    readonly CONNECT_BUTTON: string;
+    readonly NOTE_BUTTON: string;
+    readonly SEND_BUTTON: string;
+    readonly MESSAGE_BUTTON: string;
+    readonly MESSAGE_TEXTAREA: string;
+    readonly SEND_MESSAGE_BUTTON: string;
     readonly PROFILE_PHOTO: "img.global-nav__me-photo";
 };
