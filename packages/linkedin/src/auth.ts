@@ -3,7 +3,7 @@ import Puppeteer from 'puppeteer';
 import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
-import { checkPageHealth, checkBrowserHealth, waitForPageHealth, cleanupUserDataDir, safeEvaluate, safeClearStorage } from './utils/browserHealth';
+import { checkPageHealth, checkBrowserHealth, waitForPageHealth, cleanupUserDataDir, safeEvaluate, safeClearStorage, enforceRequestSpacing } from './utils/browserHealth';
 
 // Network connectivity pre-check
 async function checkNetworkConnectivity(): Promise<void> {
@@ -79,9 +79,18 @@ export async function initLinkedInContext(
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       
-      // Network configuration (reduced automation footprint)
+      // Network configuration for LinkedIn rate limiting resistance
       '--disable-features=VizDisplayCompositor',
       '--disable-ipc-flooding-protection',
+      '--enable-features=NetworkServiceInProcess',
+      '--disable-features=NetworkService',
+      '--ignore-certificate-errors-spki-list',
+      '--ignore-ssl-errors',
+      '--ignore-certificate-errors',
+      '--disable-site-isolation-trials',
+      '--disable-features=BlockInsecurePrivateNetworkRequests',
+      '--force-color-profile=srgb',
+      '--disable-background-networking',
       
       // User data and profile
       `--user-data-dir=${userDataDir}`,
@@ -438,6 +447,9 @@ export async function initLinkedInContext(
       console.warn(`Failed to set cookies: ${failedCookies.join(', ')}`);
     }
 
+  // Enforce request spacing to prevent rate limiting
+  await enforceRequestSpacing();
+
   // Robust navigation with retry targets and better error handling
   const targets = [
     'https://www.linkedin.com/feed/',
@@ -460,18 +472,60 @@ export async function initLinkedInContext(
         continue;
       }
       
-      const resp = await page.goto(target, {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000  // Reduced from 45000ms to 30000ms for faster failure detection
-      });
+      // Enhanced navigation with rate limiting handling
+      let resp = null;
+      let retryCount = 0;
+      const maxRetries = 3;
       
-      if (!resp) {
-        console.warn(`Navigation to ${target} returned no response`);
-        continue;
+      while (retryCount <= maxRetries) {
+        try {
+          resp = await page.goto(target, {
+            waitUntil: 'domcontentloaded',
+            timeout: 30000
+          });
+          
+          if (!resp) {
+            throw new Error('Navigation returned no response');
+          }
+          
+          // Handle LinkedIn rate limiting (HTTP 429)
+          if (resp.status() === 429) {
+            const retryAfter = resp.headers()['retry-after'];
+            const baseDelay = retryAfter ? parseInt(retryAfter) * 1000 : 5000;
+            const exponentialDelay = baseDelay * Math.pow(2, retryCount);
+            const jitteredDelay = exponentialDelay + (Math.random() * 2000); // Add 0-2s jitter
+            
+            console.warn(`Rate limited (429) on attempt ${retryCount + 1}/${maxRetries + 1}. Waiting ${Math.round(jitteredDelay/1000)}s before retry...`);
+            
+            if (retryCount < maxRetries) {
+              await new Promise(resolve => setTimeout(resolve, jitteredDelay));
+              retryCount++;
+              continue;
+            } else {
+              throw new Error(`Rate limiting persisted after ${maxRetries + 1} attempts`);
+            }
+          }
+          
+          if (resp.status() >= 400) {
+            throw new Error(`HTTP ${resp.status()} error`);
+          }
+          
+          break; // Success, exit retry loop
+          
+        } catch (error: any) {
+          retryCount++;
+          if (retryCount > maxRetries) {
+            throw error;
+          }
+          
+          const retryDelay = 2000 * retryCount + (Math.random() * 1000); // Progressive delay with jitter
+          console.warn(`Navigation attempt ${retryCount}/${maxRetries + 1} failed: ${error.message}. Retrying in ${Math.round(retryDelay/1000)}s...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        }
       }
       
-      if (resp.status() >= 400) {
-        console.warn(`Navigation to ${target} failed with status ${resp.status()}`);
+      if (!resp || resp.status() >= 400) {
+        console.warn(`Navigation to ${target} failed with status ${resp?.status() || 'No response'}`);
         continue;
       }
       

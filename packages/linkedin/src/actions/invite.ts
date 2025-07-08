@@ -1,6 +1,6 @@
 import { Page } from 'puppeteer';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
-import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior } from '../utils/browserHealth';
+import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing } from '../utils/browserHealth';
 
 export async function sendInvitation(
   page: Page,
@@ -13,6 +13,9 @@ export async function sendInvitation(
   }
 
   console.log(`Navigating to profile: ${profileUrl}`);
+  
+  // Enforce request spacing to prevent rate limiting
+  await enforceRequestSpacing();
   
   // Add human-like delay before navigation
   const navigationDelay = humanDelay(2000, 60); // 800ms-3200ms variation

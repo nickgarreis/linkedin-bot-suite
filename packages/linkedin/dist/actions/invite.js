@@ -9,6 +9,8 @@ async function sendInvitation(page, profileUrl, note) {
         throw new Error(`Invalid LinkedIn profile URL: ${profileUrl}`);
     }
     console.log(`Navigating to profile: ${profileUrl}`);
+    // Enforce request spacing to prevent rate limiting
+    await (0, browserHealth_1.enforceRequestSpacing)();
     // Add human-like delay before navigation
     const navigationDelay = (0, browserHealth_1.humanDelay)(2000, 60); // 800ms-3200ms variation
     await new Promise(resolve => setTimeout(resolve, navigationDelay));

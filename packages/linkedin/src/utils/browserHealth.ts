@@ -1,5 +1,26 @@
 import { Page, Browser } from 'puppeteer';
 
+// Global session timing to prevent rate limiting
+let lastLinkedInRequest = 0;
+const MIN_REQUEST_SPACING = 8000; // Minimum 8 seconds between LinkedIn requests
+
+/**
+ * Enforces minimum spacing between LinkedIn requests to avoid rate limiting
+ */
+export async function enforceRequestSpacing(): Promise<void> {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastLinkedInRequest;
+  
+  if (timeSinceLastRequest < MIN_REQUEST_SPACING) {
+    const waitTime = MIN_REQUEST_SPACING - timeSinceLastRequest;
+    const jitteredWait = waitTime + (Math.random() * 2000); // Add 0-2s jitter
+    console.log(`Enforcing request spacing: waiting ${Math.round(jitteredWait/1000)}s to avoid rate limiting...`);
+    await new Promise(resolve => setTimeout(resolve, jitteredWait));
+  }
+  
+  lastLinkedInRequest = Date.now();
+}
+
 /**
  * Safe page evaluation that handles frame detachment
  */

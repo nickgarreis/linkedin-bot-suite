@@ -12,6 +12,8 @@ async function sendMessage(page, profileUrl, message) {
         throw new Error('Message content cannot be empty');
     }
     console.log(`Navigating to profile for messaging: ${profileUrl}`);
+    // Enforce request spacing to prevent rate limiting
+    await (0, browserHealth_1.enforceRequestSpacing)();
     // Add random delay and use flexible navigation
     const randomDelay = Math.floor(Math.random() * 2000) + 1000;
     await new Promise(resolve => setTimeout(resolve, randomDelay));

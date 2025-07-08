@@ -1,6 +1,6 @@
 import { Page } from 'puppeteer';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
-import { safeElementInteraction, verifyPageStability } from '../utils/browserHealth';
+import { safeElementInteraction, verifyPageStability, enforceRequestSpacing } from '../utils/browserHealth';
 
 export async function sendMessage(
   page: Page,
@@ -17,6 +17,9 @@ export async function sendMessage(
   }
   
   console.log(`Navigating to profile for messaging: ${profileUrl}`);
+  
+  // Enforce request spacing to prevent rate limiting
+  await enforceRequestSpacing();
   
   // Add random delay and use flexible navigation
   const randomDelay = Math.floor(Math.random() * 2000) + 1000;
