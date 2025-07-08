@@ -2004,7 +2004,8 @@ export async function analyzeLinkedInButtonStructure(page: Page): Promise<{
     let screenshot: string | undefined;
     try {
       if (buttonAnalysis.length > 0) {
-        screenshot = await page.screenshot({ 
+        screenshot = await page.screenshot({
+          type: 'jpeg',
           encoding: 'base64',
           clip: { x: 0, y: 0, width: 800, height: 600 }, // Smaller screenshot
           quality: 50 // Lower quality to reduce memory
@@ -2344,8 +2345,12 @@ async function validateElement(element: any, page: Page): Promise<{ isValid: boo
                    style.display !== 'none' && 
                    style.visibility !== 'hidden' &&
                    style.opacity !== '0',
-        isClickable: !(el as HTMLButtonElement).disabled && style.pointerEvents !== 'none',
+        isClickable: !(
+          (el as any).disabled ||
+          el.getAttribute('aria-disabled') === 'true'
+        ) && style.pointerEvents !== 'none',
         tagName: el.tagName.toLowerCase(),
+        role: el.getAttribute('role') || '',
         ariaLabel: el.getAttribute('aria-label') || '',
         textContent: el.textContent?.trim() || ''
       };
@@ -2359,11 +2364,13 @@ async function validateElement(element: any, page: Page): Promise<{ isValid: boo
       return { isValid: false, reason: 'Element not clickable' };
     }
     
-    if (elementInfo.tagName !== 'button') {
-      return { isValid: false, reason: 'Element is not a button' };
+    // Allow modern LinkedIn controls that are not <button>
+    const allowedTags = ['button', 'div', 'span', 'a'];
+    if (!allowedTags.includes(elementInfo.tagName) && elementInfo.role !== 'button') {
+      return { isValid: false, reason: `Unsupported tag: ${elementInfo.tagName} (role: ${elementInfo.role})` };
     }
     
-    return { isValid: true, reason: `Valid button: "${elementInfo.ariaLabel || elementInfo.textContent}"` };
+    return { isValid: true, reason: `Valid element: ${elementInfo.tagName}[role="${elementInfo.role}"] "${elementInfo.ariaLabel || elementInfo.textContent}"` };
     
   } catch (error) {
     return { isValid: false, reason: `Validation error: ${error}` };
@@ -2799,7 +2806,7 @@ async function captureFailureScreenshot(page: Page, buttonType: string): Promise
   
   try {
     const screenshot = await page.screenshot({
-      type: 'png',
+      type: 'jpeg',
       encoding: 'base64',
       fullPage: false, // Just visible area for smaller size
       quality: 60 // Reduced quality for smaller file size
