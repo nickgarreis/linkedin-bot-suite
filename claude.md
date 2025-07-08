@@ -286,3 +286,105 @@ Additional environment variables for Docker Worker:
 - **Target Service**: `RENDER_SERVICE_ID` points to worker service
 - **Security**: `INTERNAL_API_KEY` protects internal endpoints
 - **Automatic Redeployment**: Updates cookies and restarts worker in one operation
+
+## Render CLI & API Usage Guide
+
+### CLI Authentication & Setup
+The Render CLI is authenticated as Nick Garreis (nickgarreis24@gmail.com) and provides both interactive and non-interactive modes for automation.
+
+#### Key CLI Commands
+```bash
+# List all services (non-interactive mode required for scripts)
+render services list -o json
+
+# Get specific service details
+render services get <service-id> -o json
+
+# View logs (build, app, request types)
+render logs -r <service-id> --type=build --limit=50 -o text
+render logs -r <service-id> --type=app --limit=30 -o text
+
+# Create deployments (requires confirmation)
+echo "y" | render deploys create <service-id> --clear-cache -o json
+
+# SSH into service instances
+render ssh <service-id>
+```
+
+#### CLI Limitations & Workarounds
+- **Interactive Mode Issues**: CLI requires TTY for interactive mode; use `-o json/yaml/text` for scripts
+- **Confirmation Prompts**: Use `echo "y" |` or `--confirm` flag to bypass prompts
+- **Environment Variables**: CLI doesn't have direct env var commands; use API instead
+
+### Render API Reference
+
+#### Service Management
+```bash
+# Get service configuration
+curl -X GET "https://api.render.com/v1/services/<service-id>" \
+  -H "Authorization: Bearer ${RENDER_API_KEY}"
+
+# Update service configuration (build command, etc.)
+curl -X PATCH "https://api.render.com/v1/services/<service-id>" \
+  -H "Authorization: Bearer ${RENDER_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"buildCommand": "new-build-command"}'
+```
+
+#### Environment Variables
+```bash
+# Add/Update environment variables
+curl -X PUT "https://api.render.com/v1/services/<service-id>/env-vars" \
+  -H "Authorization: Bearer ${RENDER_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '[{"key": "REDIS_URL", "value": "redis://..."}]'
+
+# Get environment variables (may require specific permissions)
+curl -X GET "https://api.render.com/v1/services/<service-id>/env-vars" \
+  -H "Authorization: Bearer ${RENDER_API_KEY}"
+```
+
+#### Deployment Management
+```bash
+# Trigger new deployment
+curl -X POST "https://api.render.com/v1/services/<service-id>/deploys" \
+  -H "Authorization: Bearer ${RENDER_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"clearCache": "clear"}'
+
+# Get deployment status
+curl -X GET "https://api.render.com/v1/services/<service-id>/deploys" \
+  -H "Authorization: Bearer ${RENDER_API_KEY}"
+```
+
+### Troubleshooting Common Issues
+
+#### Build Command Discrepancies
+- **Problem**: Service configuration may override render.yaml settings
+- **Solution**: Use API to update service build command directly
+- **Verification**: Check actual build command in service details: `serviceDetails.envSpecificDetails.buildCommand`
+
+#### Environment Variable Configuration
+- **Problem**: Missing environment variables cause runtime failures
+- **Solution**: Use Render API to add missing variables (CLI lacks env var commands)
+- **Critical Variables**: `REDIS_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE`, etc.
+
+#### TypeScript Composite Build Issues
+- **Problem**: `Cannot find module` errors during deployment
+- **Root Cause**: Dependencies not built in correct order
+- **Solution**: Update `build:api` script to include dependency chain:
+  ```bash
+  "build:api": "pnpm run build:clean && pnpm run build:shared && pnpm run build:linkedin && pnpm run build:bot-core && pnpm --filter @linkedin-bot-suite/api-server build"
+  ```
+
+#### Deployment Monitoring
+- **Build Logs**: `render logs -r <service-id> --type=build`
+- **Runtime Logs**: `render logs -r <service-id> --type=app`
+- **Build Verification**: Add verification steps to build commands
+- **Auto-deployment**: Triggered by git pushes to main branch
+
+### API Response Handling
+- **Empty Responses**: API may return empty responses without error codes
+- **Authentication**: Ensure `RENDER_API_KEY` has proper permissions
+- **Rate Limiting**: Be aware of API rate limits for frequent requests
+- **Error Handling**: Check HTTP status codes and response bodies for debugging

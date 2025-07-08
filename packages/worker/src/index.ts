@@ -40,7 +40,7 @@ console.log(`Concurrency: ${concurrency}`);
 const worker = new Worker<LinkedInJob>(queueName, processJob, {
   connection: { 
     url: process.env.REDIS_URL!,
-    // Enhanced Redis connection options with optimized timeouts
+    // Enhanced Redis connection options with increased timeouts for cloud environments
     retryDelayOnFailover: 100,
     lazyConnect: true,
     maxRetriesPerRequest: 5,
@@ -48,10 +48,14 @@ const worker = new Worker<LinkedInJob>(queueName, processJob, {
     enableReadyCheck: true,
     family: 4, // Use IPv4
     keepAlive: 15000,
-    connectTimeout: 5000,
-    commandTimeout: 3000,
+    connectTimeout: 10000,   // Increased from 5000ms to 10000ms
+    commandTimeout: 15000,   // Increased from 3000ms to 15000ms
     // Additional stability options
     enableOfflineQueue: false,
+    reconnectOnError: (err: Error) => {
+      console.log('Redis reconnectOnError triggered:', err.message);
+      return err.message.includes('READONLY') || err.message.includes('ECONNRESET');
+    },
   },
   concurrency: 1, // Reduced concurrency for stability
   prefix: process.env.BULLMQ_PREFIX || 'bull',
@@ -69,12 +73,31 @@ worker.on('ready', () => {
 worker.on('error', (err) => {
   console.error('Worker error:', err);
   
-  // Check if it's a Redis connection error
-  if (err.message.includes('ECONNREFUSED') || 
-      err.message.includes('ETIMEDOUT') ||
-      err.message.includes('Connection is closed')) {
-    console.error('Redis connection error detected, attempting to reconnect...');
-    // The worker will automatically attempt to reconnect due to Redis client settings
+  // Enhanced error categorization and logging
+  if (err.message.includes('Command timed out')) {
+    console.error('❌ Redis command timeout detected:', {
+      error: err.message,
+      timestamp: new Date().toISOString(),
+      suggestion: 'Consider upgrading Redis plan or checking network connectivity'
+    });
+  } else if (err.message.includes('ECONNREFUSED') || 
+             err.message.includes('ETIMEDOUT') ||
+             err.message.includes('Connection is closed')) {
+    console.error('❌ Redis connection error detected, attempting to reconnect...', {
+      error: err.message,
+      timestamp: new Date().toISOString()
+    });
+  } else if (err.message.includes('READONLY')) {
+    console.error('❌ Redis in read-only mode (failover in progress):', {
+      error: err.message,
+      timestamp: new Date().toISOString()
+    });
+  } else {
+    console.error('❌ Unhandled worker error:', {
+      error: err.message,
+      stack: err.stack,
+      timestamp: new Date().toISOString()
+    });
   }
 });
 
@@ -90,10 +113,14 @@ async function initRedisMonitoring() {
   try {
     redisMonitorClient = new Redis(process.env.REDIS_URL!, {
       maxRetriesPerRequest: 3,
-      connectTimeout: 5000,
-      commandTimeout: 2000,
+      connectTimeout: 10000,   // Increased from 5000ms to 10000ms
+      commandTimeout: 10000,   // Increased from 2000ms to 10000ms
       enableOfflineQueue: false,
       lazyConnect: false,
+      reconnectOnError: (err: Error) => {
+        console.log('Redis monitor reconnectOnError triggered:', err.message);
+        return err.message.includes('READONLY') || err.message.includes('ECONNRESET');
+      },
     });
     
     redisMonitorClient.on('connect', () => {
@@ -125,29 +152,63 @@ async function initRedisMonitoring() {
 // Initialize Redis monitoring
 initRedisMonitoring();
 
-// Health check function
+// Enhanced health check function with detailed diagnostics
 async function performHealthCheck() {
   try {
-    // Check Redis connection
+    // Check Redis connection with timeout measurement
     let redisHealthy = false;
+    let redisPingTime = 0;
+    
     if (redisMonitorClient) {
       try {
+        const startTime = Date.now();
         await redisMonitorClient.ping();
+        redisPingTime = Date.now() - startTime;
         redisHealthy = true;
       } catch (pingError) {
-        console.error('Redis ping failed:', pingError);
+        const errorMessage = pingError instanceof Error ? pingError.message : String(pingError);
+        console.error('❌ Redis ping failed:', {
+          error: errorMessage,
+          timestamp: new Date().toISOString(),
+          clientStatus: redisMonitorClient.status
+        });
       }
     }
     
-    // Check worker status
+    // Check worker status and connection health
     const isRunning = !worker.closing;
+    const memoryUsage = process.memoryUsage();
     
-    console.log(`Health check: Redis ${redisHealthy ? '✅' : '❌'}, Worker ${isRunning ? '✅' : '❌'}, Active jobs: ${activeJobs}`);
+    const healthStatus = {
+      redis: redisHealthy,
+      worker: isRunning,
+      activeJobs,
+      redisPingTime: redisPingTime > 0 ? `${redisPingTime}ms` : 'N/A',
+      memoryUsage: {
+        rss: Math.round(memoryUsage.rss / 1024 / 1024) + 'MB',
+        heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024) + 'MB'
+      },
+      timestamp: new Date().toISOString()
+    };
     
-    return { redis: redisHealthy, worker: isRunning, activeJobs };
+    console.log(`Health check: Redis ${redisHealthy ? '✅' : '❌'}, Worker ${isRunning ? '✅' : '❌'}, Active jobs: ${activeJobs}, Ping: ${redisPingTime}ms, Memory: ${healthStatus.memoryUsage.rss}`);
+    
+    // Alert on slow Redis responses
+    if (redisHealthy && redisPingTime > 5000) {
+      console.warn('⚠️ Redis response time is slow:', redisPingTime + 'ms');
+    }
+    
+    return healthStatus;
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     console.error('Health check failed:', error);
-    return { redis: false, worker: false, activeJobs };
+    return { 
+      redis: false, 
+      worker: false, 
+      activeJobs, 
+      error: errorMessage,
+      timestamp: new Date().toISOString()
+    };
   }
 }
 
