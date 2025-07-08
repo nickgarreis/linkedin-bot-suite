@@ -47,9 +47,7 @@ RUN apt-get update && apt-get install -y \
     && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
-# Configure DNS for better network reliability
-RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf \
-    && echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+# DNS configuration removed - containers inherit DNS from host
 
 # Create necessary directories with proper permissions
 RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
