@@ -34,3 +34,9 @@ services:
         value: linkedin-jobs
       - key: BULLMQ_PREFIX
         value: bull
+      - key: RENDER_API_KEY
+        sync: false
+      - key: RENDER_SERVICE_ID
+        sync: false
+      - key: INTERNAL_API_KEY
+        sync: false
