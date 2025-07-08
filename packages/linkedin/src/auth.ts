@@ -5,13 +5,70 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
 import { checkPageHealth, checkBrowserHealth, waitForPageHealth, cleanupUserDataDir, safeEvaluate, safeClearStorage } from './utils/browserHealth';
 
+// Network connectivity pre-check
+async function checkNetworkConnectivity(): Promise<void> {
+  try {
+    const https = await import('https');
+    const options = {
+      hostname: 'www.linkedin.com',
+      port: 443,
+      path: '/',
+      method: 'HEAD',
+      timeout: 10000,
+    };
+
+    return new Promise((resolve, reject) => {
+      const req = https.request(options, (res) => {
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 400) {
+          console.log('✅ Network connectivity to LinkedIn confirmed');
+          resolve();
+        } else {
+          reject(new Error(`LinkedIn returned status ${res.statusCode}`));
+        }
+      });
+
+      req.on('error', (err) => {
+        reject(new Error(`Network connectivity check failed: ${err.message}`));
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Network connectivity check timed out'));
+      });
+
+      req.end();
+    });
+  } catch (error) {
+    throw new Error(`Network pre-check failed: ${error}`);
+  }
+}
+
 export async function initLinkedInContext(
   proxy?: string
 ): Promise<{ browser: Browser; page: Page; userDataDir: string }> {
+  // Perform network connectivity check first
+  try {
+    await checkNetworkConnectivity();
+  } catch (connectivityError) {
+    console.error('❌ Network connectivity check failed:', connectivityError);
+    throw new Error(`Network connectivity issue detected: ${connectivityError}`);
+  }
+
   const pptr = addExtra(Puppeteer);
   pptr.use(StealthPlugin());
 
   const userDataDir = `/tmp/chrome-user-data-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  
+  // Enhanced user agent rotation for better anti-detection
+  const userAgents = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+  ];
+  const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
+  console.log('Using user agent:', randomUserAgent);
   
   const launchOptions: any = {
     headless: 'new',
@@ -117,9 +174,12 @@ export async function initLinkedInContext(
     page = pages[0] || await browser.newPage();
     console.log('Page created successfully');
     
-    // Set default timeouts - extended for stability
-    page.setDefaultNavigationTimeout(60000); // 60s navigation timeout
-    page.setDefaultTimeout(45000);           // 45s operations timeout
+    // Set random user agent for anti-detection
+    await page.setUserAgent(randomUserAgent);
+    
+    // Set default timeouts - reduced for faster failure detection
+    page.setDefaultNavigationTimeout(30000); // Reduced from 60s to 30s
+    page.setDefaultTimeout(30000);           // Reduced from 45s to 30s
     
     // Set viewport
     await page.setViewport({ width: 1920, height: 1080 });
@@ -287,7 +347,7 @@ export async function initLinkedInContext(
       
       const resp = await page.goto(target, {
         waitUntil: 'domcontentloaded',
-        timeout: 45000
+        timeout: 30000  // Reduced from 45000ms to 30000ms for faster failure detection
       });
       
       if (!resp) {
@@ -333,14 +393,36 @@ export async function initLinkedInContext(
       currentUrl = page.url();
       console.log(`Landed on ${currentUrl}`);
 
-      // More comprehensive URL validation
+      // Explicit Chrome error page detection
+      if (currentUrl.startsWith('chrome-error://') || 
+          currentUrl.includes('chromewebdata') || 
+          currentUrl.startsWith('chrome://')) {
+        console.error(`❌ CRITICAL: Browser landed on Chrome error page: ${currentUrl}`);
+        console.error('This indicates network connectivity issues or LinkedIn blocking');
+        lastError = new Error(`Chrome error page detected: ${currentUrl}`);
+        continue;
+      }
+
+      // Check if we're not on LinkedIn at all
+      if (!currentUrl.includes('linkedin.com')) {
+        console.error(`❌ CRITICAL: Not on LinkedIn domain. Current URL: ${currentUrl}`);
+        lastError = new Error(`Navigation failed - not on LinkedIn: ${currentUrl}`);
+        continue;
+      }
+
+      // Comprehensive URL validation with Chrome error page detection
       if (!currentUrl.includes('/login') &&
           !currentUrl.includes('/authwall') &&
           !currentUrl.includes('/checkpoint') &&
           !currentUrl.includes('/verify') &&
           !currentUrl.includes('/challenge') &&
           currentUrl !== 'about:blank' &&
-          currentUrl !== 'data:text/html') {
+          currentUrl !== 'data:text/html' &&
+          !currentUrl.startsWith('chrome-error://') &&
+          !currentUrl.startsWith('chrome://') &&
+          !currentUrl.includes('chromewebdata') &&
+          !currentUrl.includes('error') &&
+          currentUrl.includes('linkedin.com')) {
         navOK = true;
         
         // Try to click GDPR/cookie banner if present
@@ -402,31 +484,62 @@ export async function initLinkedInContext(
     throw new Error(`Page health check failed after navigation: ${navigationHealth.error}`);
   }
 
-  // Final URL check
+  // Final URL check with enhanced error detection
   currentUrl = page.url();
   console.log('Final URL after navigation:', currentUrl);
+
+  // CRITICAL: Check for Chrome error pages first
+  if (currentUrl.startsWith('chrome-error://') || 
+      currentUrl.includes('chromewebdata') || 
+      currentUrl.startsWith('chrome://')) {
+    throw new Error(`CRITICAL: Browser on Chrome error page - network connectivity issue: ${currentUrl}`);
+  }
+
+  // Check if we're actually on LinkedIn
+  if (!currentUrl.includes('linkedin.com')) {
+    throw new Error(`CRITICAL: Not on LinkedIn domain after navigation: ${currentUrl}`);
+  }
 
   // Accept /hp as valid authenticated state, but prefer /feed
   if (currentUrl.includes('/login') || currentUrl.includes('/authwall')) {
     throw new Error('LinkedIn authentication failed - redirected to login page. Cookies may be invalid or expired.');
   }
 
-  // Enhanced login verification with multiple checkpoints including /hp page using safe evaluation
+  // Enhanced login verification with comprehensive LinkedIn page structure checks
   const loginCheckpoints = await safeEvaluate(page, () => {
     const checkpoints = {
+      // Core LinkedIn navigation elements
       globalNav: !!document.querySelector('nav.global-nav'),
       testGlobalNav: !!document.querySelector('[data-test-global-nav]'),
       feedIdentity: !!document.querySelector('.feed-identity-module'),
       globalNavMe: !!document.querySelector('.global-nav__me'),
       profileNav: !!document.querySelector('.global-nav__me-content'),
       feedContainer: !!document.querySelector('.feed-container-theme'),
+      
+      // LinkedIn domain and branding validation
       hasLinkedInClass: document.body?.classList.contains('linkedin') || false,
-      // Additional checks for /hp homepage
-      isHomepage: window.location.pathname === '/hp',
       hasLinkedInLogo: !!document.querySelector('.linkedin-logo'),
+      isLinkedInDomain: window.location.hostname.includes('linkedin.com'),
+      
+      // Page structure validation
       hasMainContent: !!document.querySelector('main'),
+      hasHeader: !!document.querySelector('header'),
+      hasValidDocumentTitle: document.title.toLowerCase().includes('linkedin'),
+      
+      // Specific page type checks
+      isHomepage: window.location.pathname === '/hp',
+      isFeedPage: window.location.pathname.includes('/feed'),
+      
+      // Error state detection
       noLoginForm: !document.querySelector('form[action*="login"]'),
-      noAuthWall: !document.querySelector('.authwall')
+      noAuthWall: !document.querySelector('.authwall'),
+      noChromeError: !window.location.href.includes('chrome-error'),
+      noErrorPage: !document.body?.innerText?.toLowerCase().includes('error'),
+      
+      // LinkedIn-specific elements that indicate successful authentication
+      hasLinkedInSearch: !!document.querySelector('[data-test-search-input]'),
+      hasNotificationIcon: !!document.querySelector('[data-test-notification-icon]'),
+      hasMessagingIcon: !!document.querySelector('[data-test-messaging-icon]')
     };
     
     console.log('Login checkpoints:', checkpoints);

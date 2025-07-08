@@ -84,11 +84,11 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
       job.updateProgress(50); // Keep job alive
       console.log(`Heartbeat for job ${jobId} - Memory delta: RSS +${memoryIncrease.rss}MB, Heap +${memoryIncrease.heapUsed}MB`);
       
-      // Enhanced memory leak detection and prevention
-      if (memoryIncrease.rss > 300) { // Critical memory usage
+      // Stricter memory leak detection and prevention
+      if (memoryIncrease.rss > 200) { // Critical memory usage - reduced from 300MB
         console.error(`⚠️ CRITICAL: Job ${jobId} using excessive memory: +${memoryIncrease.rss}MB RSS - force terminating job`);
         throw new Error(`Job terminated due to excessive memory usage: +${memoryIncrease.rss}MB RSS`);
-      } else if (memoryIncrease.rss > 200) { // Warning threshold
+      } else if (memoryIncrease.rss > 150) { // Warning threshold - reduced from 200MB
         console.warn(`⚠️ Job ${jobId} using high memory: +${memoryIncrease.rss}MB RSS`);
         
         // Force garbage collection if available
@@ -124,7 +124,7 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
     const initResult = await Promise.race([
       initLinkedInContext(process.env.PROXY_URL ?? ''),
       new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Browser initialization timeout')), 90000)
+        setTimeout(() => reject(new Error('Browser initialization timeout')), 60000)  // Reduced from 90s to 60s
       )
     ]);
     
