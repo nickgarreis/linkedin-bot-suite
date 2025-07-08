@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import fetch from 'node-fetch';
 import { CONFIG } from '../config';
 import { WebhookPayload, JOB_STATUS } from '@linkedin-bot-suite/shared';
 
