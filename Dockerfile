@@ -59,7 +59,7 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     CHROME_USER_DATA_DIR=/tmp/chrome-user-data \
     DISPLAY=:99 \
     DBUS_SESSION_BUS_ADDRESS=/dev/null \
-    NODE_OPTIONS="--max-old-space-size=512 --expose-gc" \
+    NODE_OPTIONS="--max-old-space-size=512" \
     PUPPETEER_DISABLE_HEADLESS_WARNING=true
 
 # Create app directory
