@@ -1,6 +1,6 @@
 import { Page } from 'puppeteer';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
-import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady, linkedInTyping, getActivityPattern, resetSessionState, waitForLinkedInPageLoad, waitForProfilePageReady, analyzePageStructure, validateProfilePage, waitForPageStability, monitorPageStability, optimizeMemoryUsage, smartHumanDelay, recoverFromBigpipeStuck, safeEvaluate, withContextRecovery } from '../utils/browserHealth';
+import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady, linkedInTyping, getActivityPattern, resetSessionState, waitForLinkedInPageLoad, waitForProfilePageReady, analyzePageStructure, validateProfilePage, waitForPageStability, monitorPageStability, optimizeMemoryUsage, smartHumanDelay, recoverFromBigpipeStuck, safeEvaluate, withContextRecovery, analyzeLinkedInButtonStructure, findLinkedInButton } from '../utils/browserHealth';
 import { sendMessage } from './message';
 
 export async function sendInvitation(
@@ -59,57 +59,66 @@ export async function sendInvitation(
       console.warn('Page validation failed but proceeding');
     }
     
-    // Quick check for connection state
+    // Analyze button structure for debugging
+    console.log('🔍 Analyzing current button structure...');
+    const buttonAnalysis = await analyzeLinkedInButtonStructure(page);
+    console.log('📊 Button analysis results:');
+    buttonAnalysis.suggestions.forEach(suggestion => console.log(`   ${suggestion}`));
+
+    // Quick check for connection state using progressive detection
     console.log('Checking connection state...');
-    let isConnected = false;
-    try {
-      await page.waitForSelector('button[aria-label*="Message"]', { timeout: 2000 });
-      isConnected = true;
+    const messageButton = await findLinkedInButton(page, 'message', 3000);
+    const isConnected = messageButton !== null;
+    
+    if (isConnected) {
       console.log('✅ User is already connected');
-    } catch {
+      if (note) {
+        console.log('🔄 Auto-fallback: Sending message to already connected user...');
+        const messageResult = await sendMessage(page, profileUrl, note);
+        return {
+          success: messageResult.success,
+          message: messageResult.message,
+          profileUrl: messageResult.profileUrl,
+          actionTaken: 'messaged' as const
+        };
+      }
+    } else {
       console.log('User not connected, proceeding with invitation');
     }
 
-    if (isConnected && note) {
-      // Already connected, send message
-      console.log('🔄 Auto-fallback: Sending message to already connected user...');
-      const messageResult = await sendMessage(page, profileUrl, note);
-      return {
-        success: messageResult.success,
-        message: messageResult.message,
-        profileUrl: messageResult.profileUrl,
-        actionTaken: 'messaged' as const
-      };
+    // Progressive button detection for Connect button with enhanced stability
+    console.log('🔍 Looking for Connect button with progressive detection...');
+    const connectButtonResult = await findLinkedInButton(page, 'connect', 20000); // Increased from 15s to 20s for stability
+    
+    if (!connectButtonResult) {
+      // Try fallback to message if connect not available
+      console.log('❌ Connect button not found, trying message fallback...');
+      const messageButtonFallback = await findLinkedInButton(page, 'message', 8000); // Increased from 5s to 8s for stability
+      
+      if (messageButtonFallback && note) {
+        console.log('🔄 Connect button not found, falling back to message...');
+        const messageResult = await sendMessage(page, profileUrl, note);
+        return {
+          success: messageResult.success,
+          message: messageResult.message,
+          profileUrl: messageResult.profileUrl,
+          actionTaken: 'messaged' as const
+        };
+      }
+      
+      if (messageButtonFallback && !note) {
+        throw new Error('User is already connected but no message provided');
+      }
+      
+      // Enhanced error with debugging info
+      const errorMsg = `Neither Connect nor Message button found - profile may be private or restricted. 
+        Button analysis: ${buttonAnalysis.suggestions.join(', ')}`;
+      throw new Error(errorMsg);
     }
 
-    // Find and click connect button
-    console.log('Looking for Connect button...');
-    let connectButton;
-    try {
-      connectButton = await page.waitForSelector(
-        'button[aria-label*="Connect"], button[aria-label*="Invite"]',
-        { timeout: 5000, visible: true }
-      );
-      console.log('✅ Connect button found');
-    } catch (error) {
-      // Try fallback to message if connect not available
-      try {
-        await page.waitForSelector('button[aria-label*="Message"]', { timeout: 2000 });
-        if (note) {
-          console.log('🔄 Connect button not found, falling back to message...');
-          const messageResult = await sendMessage(page, profileUrl, note);
-          return {
-            success: messageResult.success,
-            message: messageResult.message,
-            profileUrl: messageResult.profileUrl,
-            actionTaken: 'messaged' as const
-          };
-        }
-        throw new Error('User is already connected but no message provided');
-      } catch {
-        throw new Error('Neither Connect nor Message button found - profile may be private or restricted');
-      }
-    }
+    console.log(`✅ Connect button found using ${connectButtonResult.strategy} (confidence: ${connectButtonResult.confidence})`);
+    console.log(`   Selector: ${connectButtonResult.selector}`);
+    const connectButton = connectButtonResult.element;
     
     // Click the connect button
     console.log('Clicking Connect button...');
@@ -117,39 +126,75 @@ export async function sendInvitation(
       throw new Error('Connect button is null');
     }
     await connectButton.click();
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Increased from 1.5s to 2s for stability
 
-    // Add note if provided
+    // Add note if provided using progressive detection
     if (note) {
       try {
-        console.log('Adding personal note...');
-        const noteButton = await page.waitForSelector('button[aria-label*="Add a note"]', { timeout: 3000 });
-        if (!noteButton) {
-          throw new Error('Note button not found');
-        }
-        await noteButton.click();
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log('🔍 Looking for Add Note button with progressive detection...');
+        const noteButtonResult = await findLinkedInButton(page, 'note', 8000); // Increased from 5s to 8s for stability
         
-        const textarea = await page.waitForSelector('textarea[name="message"]', { timeout: 3000 });
-        if (!textarea) {
-          throw new Error('Textarea not found');
+        if (!noteButtonResult) {
+          console.warn('Note button not found, sending invitation without note');
+        } else {
+          console.log(`✅ Note button found using ${noteButtonResult.strategy} (confidence: ${noteButtonResult.confidence})`);
+          await noteButtonResult.element.click();
+          await new Promise(resolve => setTimeout(resolve, 1500)); // Increased from 1s to 1.5s for stability
+          
+          // Enhanced textarea detection with multiple selectors
+          const textareaSelectors = [
+            'textarea[name="message"]',
+            'textarea[placeholder*="Add a note"]',
+            'textarea[aria-label*="Add a note"]',
+            'textarea[data-control-name="add_note_text"]',
+            '.send-invite__custom-message textarea',
+            'div[contenteditable="true"]'
+          ];
+          
+          let textarea = null;
+          for (const selector of textareaSelectors) {
+            try {
+              textarea = await page.waitForSelector(selector, { timeout: 3000 }); // Increased from 2s to 3s for stability
+              if (textarea) {
+                console.log(`✅ Textarea found with selector: ${selector}`);
+                break;
+              }
+            } catch (selectorError) {
+              continue;
+            }
+          }
+          
+          if (!textarea) {
+            throw new Error('Textarea not found with any selector');
+          }
+          
+          await textarea.type(note, { delay: 50 });
+          console.log('✅ Note added successfully');
         }
-        await textarea.type(note, { delay: 50 });
-        console.log('Note added successfully');
       } catch (noteError) {
         console.warn('Could not add note:', (noteError as Error).message);
       }
     }
 
-    // Send invitation
-    console.log('Sending invitation...');
-    const sendButton = await page.waitForSelector('button[aria-label*="Send"]', { timeout: 5000 });
-    if (!sendButton) {
-      throw new Error('Send button not found');
-    }
-    await sendButton.click();
+    // Send invitation using progressive detection
+    console.log('🔍 Looking for Send button with progressive detection...');
+    const sendButtonResult = await findLinkedInButton(page, 'send', 10000); // Increased from 8s to 10s for stability
     
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    if (!sendButtonResult) {
+      // Enhanced error with debugging context
+      console.log('🔍 Analyzing send button structure for debugging...');
+      const sendButtonAnalysis = await analyzeLinkedInButtonStructure(page);
+      const sendSuggestions = sendButtonAnalysis.suggestions.filter(s => s.toLowerCase().includes('send'));
+      
+      throw new Error(`Send button not found. Send button analysis: ${sendSuggestions.join(', ') || 'No send button suggestions available'}`);
+    }
+    
+    console.log(`✅ Send button found using ${sendButtonResult.strategy} (confidence: ${sendButtonResult.confidence})`);
+    console.log(`   Selector: ${sendButtonResult.selector}`);
+    
+    await sendButtonResult.element.click();
+    
+    await new Promise(resolve => setTimeout(resolve, 3000)); // Increased from 2s to 3s for stability
     
     console.log(`Invitation sent successfully to ${profileUrl}`);
     return {

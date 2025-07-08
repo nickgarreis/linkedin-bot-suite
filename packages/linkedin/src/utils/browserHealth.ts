@@ -1782,3 +1782,407 @@ export async function waitForLinkedInPageReady(
   console.warn(`LinkedIn page readiness timeout after ${timeout}ms`);
   return false;
 }
+
+/**
+ * Analyzes DOM structure to find button patterns and create debugging info
+ */
+export async function analyzeLinkedInButtonStructure(page: Page): Promise<{
+  buttons: Array<{
+    text: string;
+    ariaLabel: string;
+    className: string;
+    dataAttributes: Record<string, string>;
+    selector: string;
+    isVisible: boolean;
+  }>;
+  suggestions: string[];
+  screenshot?: string;
+}> {
+  try {
+    console.log('🔍 Analyzing LinkedIn button structure...');
+    
+    // Capture screenshot for visual debugging
+    const screenshot = await page.screenshot({ 
+      encoding: 'base64',
+      clip: { x: 0, y: 0, width: 1920, height: 1080 }
+    });
+    
+    // Get all button elements and their properties
+    const buttonAnalysis = await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll('button'));
+      
+      return buttons.map(button => {
+        const rect = button.getBoundingClientRect();
+        const style = window.getComputedStyle(button);
+        const isVisible = rect.width > 0 && rect.height > 0 && 
+                          style.display !== 'none' && 
+                          style.visibility !== 'hidden' &&
+                          style.opacity !== '0';
+        
+        const text = button.textContent?.trim() || '';
+        const ariaLabel = button.getAttribute('aria-label') || '';
+        const className = button.className || '';
+        
+        // Get all data attributes
+        const dataAttributes: Record<string, string> = {};
+        for (const attr of button.attributes) {
+          if (attr.name.startsWith('data-')) {
+            dataAttributes[attr.name] = attr.value;
+          }
+        }
+        
+        // Generate a unique selector
+        let selector = 'button';
+        if (button.id) selector += `#${button.id}`;
+        if (className) selector += `.${className.split(' ').join('.')}`;
+        if (ariaLabel) selector += `[aria-label="${ariaLabel}"]`;
+        
+        return {
+          text,
+          ariaLabel,
+          className,
+          dataAttributes,
+          selector: selector.slice(0, 200), // Limit selector length
+          isVisible
+        };
+      });
+    });
+    
+    // Generate selector suggestions based on found buttons
+    const suggestions = [];
+    
+    // Look for Connect-like buttons
+    const connectButtons = buttonAnalysis.filter(btn => 
+      btn.isVisible && (
+        btn.text.toLowerCase().includes('connect') || 
+        btn.text.toLowerCase().includes('vernetzen') ||
+        btn.ariaLabel.toLowerCase().includes('connect') ||
+        btn.ariaLabel.toLowerCase().includes('vernetzen')
+      )
+    );
+    
+    if (connectButtons.length > 0) {
+      suggestions.push(`✅ Found ${connectButtons.length} Connect-like buttons`);
+      connectButtons.forEach(btn => {
+        suggestions.push(`   Connect: "${btn.text}" | aria-label: "${btn.ariaLabel}" | class: "${btn.className}"`);
+      });
+    } else {
+      suggestions.push(`❌ No Connect buttons found`);
+    }
+    
+    // Look for Message-like buttons
+    const messageButtons = buttonAnalysis.filter(btn => 
+      btn.isVisible && (
+        btn.text.toLowerCase().includes('message') || 
+        btn.text.toLowerCase().includes('nachricht') ||
+        btn.ariaLabel.toLowerCase().includes('message') ||
+        btn.ariaLabel.toLowerCase().includes('nachricht')
+      )
+    );
+    
+    if (messageButtons.length > 0) {
+      suggestions.push(`✅ Found ${messageButtons.length} Message-like buttons`);
+      messageButtons.forEach(btn => {
+        suggestions.push(`   Message: "${btn.text}" | aria-label: "${btn.ariaLabel}" | class: "${btn.className}"`);
+      });
+    } else {
+      suggestions.push(`❌ No Message buttons found`);
+    }
+    
+    // Look for other profile action buttons
+    const profileButtons = buttonAnalysis.filter(btn => 
+      btn.isVisible && (
+        btn.text.toLowerCase().includes('follow') || 
+        btn.text.toLowerCase().includes('more') ||
+        btn.ariaLabel.toLowerCase().includes('follow') ||
+        btn.ariaLabel.toLowerCase().includes('more')
+      )
+    );
+    
+    if (profileButtons.length > 0) {
+      suggestions.push(`✅ Found ${profileButtons.length} other profile action buttons`);
+      profileButtons.forEach(btn => {
+        suggestions.push(`   Other: "${btn.text}" | aria-label: "${btn.ariaLabel}"`);
+      });
+    }
+    
+    // Add summary statistics
+    const visibleButtons = buttonAnalysis.filter(btn => btn.isVisible);
+    suggestions.unshift(`📊 Total buttons: ${buttonAnalysis.length} (${visibleButtons.length} visible)`);
+    
+    console.log(`📊 Button analysis complete: ${buttonAnalysis.length} buttons found (${visibleButtons.length} visible)`);
+    
+    return {
+      buttons: buttonAnalysis,
+      suggestions,
+      screenshot
+    };
+    
+  } catch (error) {
+    console.error('Failed to analyze button structure:', error);
+    return {
+      buttons: [],
+      suggestions: ['Failed to analyze DOM structure'],
+      screenshot: undefined
+    };
+  }
+}
+
+/**
+ * Progressive button detection with comprehensive fallback strategies
+ */
+export async function findLinkedInButton(
+  page: Page, 
+  buttonType: 'connect' | 'message' | 'send' | 'note',
+  timeout: number = 15000
+): Promise<{
+  element: any;
+  strategy: string;
+  confidence: number;
+  selector: string;
+} | null> {
+  const startTime = Date.now();
+  
+  console.log(`🔍 Progressive search for ${buttonType} button (timeout: ${timeout}ms)`);
+  
+  const strategies = [
+    {
+      name: 'modern-2025-selectors',
+      confidence: 0.9,
+      selectors: getModernSelectors(buttonType)
+    },
+    {
+      name: 'legacy-2024-selectors', 
+      confidence: 0.8,
+      selectors: getLegacySelectors(buttonType)
+    },
+    {
+      name: 'text-based-detection',
+      confidence: 0.7,
+      selectors: getTextBasedSelectors(buttonType)
+    },
+    {
+      name: 'fuzzy-matching',
+      confidence: 0.6,
+      selectors: getFuzzySelectors(buttonType)
+    }
+  ];
+  
+  for (const strategy of strategies) {
+    if (Date.now() - startTime > timeout) {
+      console.log(`⏰ Timeout reached for ${buttonType} button search`);
+      break;
+    }
+    
+    console.log(`🔍 Trying strategy: ${strategy.name}`);
+    
+    try {
+      for (const selector of strategy.selectors) {
+        try {
+          const element = await page.waitForSelector(selector, { 
+            timeout: 1000, 
+            visible: true 
+          });
+          
+          if (element) {
+            // Verify element is actually clickable
+            const isClickable = await element.isIntersectingViewport();
+            if (isClickable) {
+              console.log(`✅ Found ${buttonType} button using ${strategy.name}: ${selector}`);
+              return {
+                element,
+                strategy: strategy.name,
+                confidence: strategy.confidence,
+                selector
+              };
+            }
+          }
+        } catch (selectorError) {
+          // Continue to next selector
+          continue;
+        }
+      }
+      
+      // Add small delay between strategies
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+    } catch (error) {
+      console.warn(`Strategy ${strategy.name} failed:`, error);
+      continue;
+    }
+  }
+  
+  console.log(`❌ No ${buttonType} button found after ${Date.now() - startTime}ms`);
+  return null;
+}
+
+function getModernSelectors(buttonType: string): string[] {
+  switch (buttonType) {
+    case 'connect':
+      return [
+        'button[aria-label*="Connect"]',
+        'button[aria-label*="Vernetzen"]',
+        'button[data-view-name*="connect"]',
+        'button[data-control-name="connect"]',
+        'button[data-control-name="contact_see_more"]',
+        '.artdeco-button--primary[aria-label*="Connect"]',
+        '.pvs-profile-actions button[aria-label*="Connect"]',
+        '[data-view-name="profile-actions"] button[aria-label*="Connect"]',
+        '.pv-s-profile-actions button[aria-label*="Connect"]',
+        '.profile-actions button[aria-label*="Connect"]'
+      ];
+    case 'message':
+      return [
+        'button[aria-label*="Message"]',
+        'button[aria-label*="Nachricht"]',
+        'button[data-control-name="message"]',
+        '.pvs-profile-actions button[aria-label*="Message"]',
+        '[data-view-name="profile-actions"] button[aria-label*="Message"]',
+        '.pv-s-profile-actions button[aria-label*="Message"]',
+        '.profile-actions button[aria-label*="Message"]'
+      ];
+    case 'send':
+      return [
+        'button[aria-label*="Send invite"]',
+        'button[aria-label*="Einladung senden"]',
+        'button[data-control-name="send.invite"]',
+        'button[data-control-name="send"]',
+        '.send-invite__actions button[aria-label*="Send"]',
+        '.artdeco-modal__actionbar button[aria-label*="Send"]'
+      ];
+    case 'note':
+      return [
+        'button[aria-label*="Add a note"]',
+        'button[aria-label*="Notiz"]',
+        'button[data-control-name="add-note"]',
+        '.send-invite__add-note-button',
+        '.artdeco-modal button[aria-label*="Add a note"]'
+      ];
+    default:
+      return [];
+  }
+}
+
+function getLegacySelectors(buttonType: string): string[] {
+  switch (buttonType) {
+    case 'connect':
+      return [
+        'button[aria-label="Connect"]',
+        'button[aria-label="Vernetzen"]',
+        '.pv-s-profile-actions button[aria-label*="Connect"]',
+        '.profile-actions button[aria-label*="Connect"]',
+        '.pv-top-card__member-action-bar button[aria-label*="Connect"]',
+        '.pv-top-card-v2-ctas button[aria-label*="Connect"]'
+      ];
+    case 'message':
+      return [
+        'button[aria-label="Message"]',
+        'button[aria-label="Nachricht"]',
+        '.pv-s-profile-actions button[aria-label*="Message"]',
+        '.profile-actions button[aria-label*="Message"]',
+        '.pv-top-card__member-action-bar button[aria-label*="Message"]'
+      ];
+    case 'send':
+      return [
+        'button[aria-label="Send invite"]',
+        'button[aria-label="Einladung senden"]',
+        '.send-invite__actions button[aria-label*="Send"]',
+        '.artdeco-modal__actionbar button'
+      ];
+    case 'note':
+      return [
+        'button[aria-label="Add a note"]',
+        'button[aria-label="Notiz"]',
+        '.send-invite__add-note-button',
+        '.artdeco-modal button[aria-label*="note"]'
+      ];
+    default:
+      return [];
+  }
+}
+
+function getTextBasedSelectors(buttonType: string): string[] {
+  switch (buttonType) {
+    case 'connect':
+      return [
+        'button:has-text("Connect")',
+        'button:has-text("Vernetzen")',
+        'button span:contains("Connect")',
+        'button span:contains("Vernetzen")',
+        'button[type="button"]:contains("Connect")',
+        'button[type="button"]:contains("Vernetzen")'
+      ];
+    case 'message':
+      return [
+        'button:has-text("Message")',
+        'button:has-text("Nachricht")',
+        'button span:contains("Message")',
+        'button span:contains("Nachricht")',
+        'button[type="button"]:contains("Message")',
+        'button[type="button"]:contains("Nachricht")'
+      ];
+    case 'send':
+      return [
+        'button:has-text("Send")',
+        'button:has-text("Senden")',
+        'button span:contains("Send")',
+        'button span:contains("Senden")',
+        'button[type="button"]:contains("Send")',
+        'button[type="button"]:contains("Senden")'
+      ];
+    case 'note':
+      return [
+        'button:has-text("Add a note")',
+        'button:has-text("Notiz")',
+        'button span:contains("Add a note")',
+        'button span:contains("Notiz")',
+        'button[type="button"]:contains("note")',
+        'button[type="button"]:contains("Notiz")'
+      ];
+    default:
+      return [];
+  }
+}
+
+function getFuzzySelectors(buttonType: string): string[] {
+  switch (buttonType) {
+    case 'connect':
+      return [
+        'button[aria-label*="connect" i]',
+        'button[aria-label*="vernetzen" i]',
+        'button[title*="connect" i]',
+        'button[title*="vernetzen" i]',
+        'button[data-control-name*="connect" i]',
+        'button[class*="connect" i]'
+      ];
+    case 'message':
+      return [
+        'button[aria-label*="message" i]',
+        'button[aria-label*="nachricht" i]',
+        'button[title*="message" i]',
+        'button[title*="nachricht" i]',
+        'button[data-control-name*="message" i]',
+        'button[class*="message" i]'
+      ];
+    case 'send':
+      return [
+        'button[aria-label*="send" i]',
+        'button[aria-label*="senden" i]',
+        'button[title*="send" i]',
+        'button[title*="senden" i]',
+        'button[data-control-name*="send" i]',
+        'button[class*="send" i]'
+      ];
+    case 'note':
+      return [
+        'button[aria-label*="note" i]',
+        'button[aria-label*="notiz" i]',
+        'button[title*="note" i]',
+        'button[title*="notiz" i]',
+        'button[data-control-name*="note" i]',
+        'button[class*="note" i]'
+      ];
+    default:
+      return [];
+  }
+}
