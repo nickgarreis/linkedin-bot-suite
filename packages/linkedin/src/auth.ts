@@ -72,76 +72,161 @@ export async function initLinkedInContext(
   const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
   console.log('Using user agent:', randomUserAgent);
   
-  const launchOptions: any = {
-    headless: 'new',
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
-    protocolTimeout: 60000, // Reduced from 180s to 60s for faster failures
-    args: [
-      // Essential container security
-      '--no-sandbox',
-      '--disable-setuid-sandbox', 
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--disable-gpu-sandbox',
-      
-      // Container stability (user's recommendation)
-      '--single-process', // Add for container stability
-      '--no-zygote', // Prevent zombie processes
-      
-      // User data (required)
-      `--user-data-dir=${userDataDir}`,
-      
-      // Memory optimization
-      '--memory-pressure-off',
-      '--max_old_space_size=512', // Limit memory usage
-      '--js-flags=--max-old-space-size=512',
-      
-      // Network configuration for containers
-      '--disable-features=NetworkService',
-      '--enable-features=NetworkServiceInProcess', 
-      '--ignore-certificate-errors-spki-list',
-      '--ignore-ssl-errors',
-      '--ignore-certificate-errors',
-      '--disable-site-isolation-trials',
-      '--disable-features=BlockInsecurePrivateNetworkRequests',
-      '--aggressive-cache-discard',
-      '--disable-background-networking',
-      
-      // Fixed window size (no randomization for stability)
-      '--window-size=1920,1080',
-      '--start-maximized',
-      
-      // Bot detection evasion
-      '--disable-blink-features=AutomationControlled',
-      '--disable-web-security',
-      '--disable-features=IsolateOrigins,site-per-process',
-      
-      // Performance optimization
-      '--disable-features=VizDisplayCompositor,TranslateUI,BlinkGenPropertyTrees',
-      '--disable-ipc-flooding-protection',
-      '--no-default-browser-check',
-      '--no-first-run',
-      '--disable-default-apps',
-      '--disable-background-timer-throttling',
-      '--disable-renderer-backgrounding',
-      '--disable-backgrounding-occluded-windows',
-      '--disable-extensions',
-      '--disable-plugins',
-      
-      ...(proxy ? [`--proxy-server=${proxy}`] : [])
-    ]
-  };
+  // Progressive fallback launch configurations
+  const launchConfigs = [
+    {
+      name: 'conservative',
+      headless: 'new' as any,
+      protocolTimeout: 180000, // 3 minutes
+      args: [
+        // Essential container security
+        '--no-sandbox',
+        '--disable-setuid-sandbox', 
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-gpu-sandbox',
+        
+        // User data (required)
+        `--user-data-dir=${userDataDir}`,
+        
+        // Memory optimization
+        '--memory-pressure-off',
+        
+        // Network configuration for containers
+        '--disable-features=NetworkService',
+        '--enable-features=NetworkServiceInProcess', 
+        '--ignore-certificate-errors-spki-list',
+        '--ignore-ssl-errors',
+        '--ignore-certificate-errors',
+        '--disable-site-isolation-trials',
+        '--disable-features=BlockInsecurePrivateNetworkRequests',
+        '--aggressive-cache-discard',
+        '--disable-background-networking',
+        
+        // Fixed window size (no randomization for stability)
+        '--window-size=1920,1080',
+        '--start-maximized',
+        
+        // Bot detection evasion
+        '--disable-blink-features=AutomationControlled',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process',
+        
+        // Performance optimization
+        '--disable-features=VizDisplayCompositor,TranslateUI,BlinkGenPropertyTrees',
+        '--disable-ipc-flooding-protection',
+        '--no-default-browser-check',
+        '--no-first-run',
+        '--disable-default-apps',
+        '--disable-background-timer-throttling',
+        '--disable-renderer-backgrounding',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-extensions',
+        '--disable-plugins',
+        
+        ...(proxy ? [`--proxy-server=${proxy}`] : [])
+      ]
+    },
+    {
+      name: 'ultra-conservative',
+      headless: 'new' as any,
+      protocolTimeout: 300000, // 5 minutes
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        `--user-data-dir=${userDataDir}`,
+        '--disable-features=VizDisplayCompositor',
+        '--memory-pressure-off',
+        '--disable-background-networking',
+        '--window-size=1920,1080',
+        ...(proxy ? [`--proxy-server=${proxy}`] : [])
+      ]
+    },
+    {
+      name: 'minimal',
+      headless: true, // Old headless mode
+      protocolTimeout: 600000, // 10 minutes
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        `--user-data-dir=${userDataDir}`,
+        ...(proxy ? [`--proxy-server=${proxy}`] : [])
+      ]
+    }
+  ];
   
-  console.log('🎲 Using optimized Chrome configuration for container stability');
+  console.log('🎲 Using progressive fallback Chrome launch strategy');
 
   let browser: Browser | null = null;
   let page: Page | null = null;
 
+  // Verify Chrome binary exists and is executable
   try {
-    console.log('Launching Chrome browser with minimal configuration...');
-    browser = await pptr.launch(launchOptions);
-    console.log('✅ Browser launched successfully');
+    const fs = await import('fs');
+    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable';
+    if (!fs.existsSync(executablePath)) {
+      throw new Error(`Chrome binary not found at ${executablePath}`);
+    }
+    console.log(`✅ Chrome binary verified at ${executablePath}`);
+  } catch (binaryError) {
+    throw new Error(`Chrome binary verification failed: ${binaryError}`);
+  }
+
+  // Progressive fallback launch strategy
+  for (let attempt = 0; attempt < launchConfigs.length; attempt++) {
+    const config = launchConfigs[attempt];
+    const launchOptions = {
+      headless: config.headless,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
+      protocolTimeout: config.protocolTimeout,
+      args: config.args
+    };
     
+    try {
+      console.log(`Attempt ${attempt + 1}: Launching Chrome with ${config.name} configuration...`);
+      console.log(`Protocol timeout: ${config.protocolTimeout}ms, Args: ${config.args.length}`);
+      
+      browser = await pptr.launch(launchOptions);
+      console.log(`✅ Browser launched successfully with ${config.name} configuration`);
+      
+      // Verify browser process is healthy
+      const browserProcess = browser.process();
+      if (browserProcess) {
+        console.log(`✅ Browser process PID: ${browserProcess.pid}`);
+      }
+      
+      break; // Success - exit loop
+      
+    } catch (launchError) {
+      console.error(`❌ Launch attempt ${attempt + 1} (${config.name}) failed:`, launchError instanceof Error ? launchError.message : launchError);
+      
+      if (browser) {
+        try {
+          await browser.close();
+        } catch (closeError) {
+          console.warn('Failed to close browser after launch failure:', closeError);
+        }
+        browser = null;
+      }
+      
+      // If this was the last attempt, throw the error
+      if (attempt === launchConfigs.length - 1) {
+        throw launchError;
+      }
+      
+      // Wait before next attempt
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  }
+
+  if (!browser) {
+    throw new Error('All Chrome launch attempts failed');
+  }
+    
+  try {
     // Check browser health before proceeding
     const browserHealthy = await checkBrowserHealth(browser);
     if (!browserHealthy) {
