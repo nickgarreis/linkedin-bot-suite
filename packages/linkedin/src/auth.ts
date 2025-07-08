@@ -212,16 +212,23 @@ export async function initLinkedInContext(
     // Set random user agent for anti-detection
     await page.setUserAgent(randomUserAgent);
     
-    // Set default timeouts - reduced for faster failure detection
-    page.setDefaultNavigationTimeout(30000); // Reduced from 60s to 30s
-    page.setDefaultTimeout(30000);           // Reduced from 45s to 30s
+    // Set conservative timeouts for container stability
+    page.setDefaultNavigationTimeout(60000); // Increased back to 60s for stability
+    page.setDefaultTimeout(60000);           // Increased back to 60s for stability
     
     // Set realistic viewport (match window size)
     await page.setViewport({ width: 1366, height: 768 });
     
     // Clear cache and storage before navigation to prevent redirect loops
     // Use data URL instead of about:blank for better security context
-    await page.goto('data:text/html,<html><head><title>Initializing</title></head><body></body></html>');
+    try {
+      await page.goto('data:text/html,<html><head><title>Initializing</title></head><body></body></html>', {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000
+      });
+    } catch (initError) {
+      console.warn('Initial navigation failed, continuing without pre-navigation:', (initError as Error).message);
+    }
     
     // Use safe storage clearing to handle SecurityError gracefully
     await safeClearStorage(page);
