@@ -3,7 +3,7 @@ services:
     name: linkedin-bot-api
     env: node
     plan: starter
-    buildCommand: pnpm install && pnpm run build:api
+    buildCommand: pnpm install --frozen-lockfile && pnpm run build:clean && pnpm run build:api
     startCommand: pnpm --filter @linkedin-bot-suite/api-server start
     healthCheckPath: /health
     envVars:
@@ -34,8 +34,3 @@ services:
         value: linkedin-jobs
       - key: BULLMQ_PREFIX
         value: bull
-    
-  - type: redis
-    name: linkedin-bot-redis
-    plan: starter
-    maxmemoryPolicy: allkeys-lru

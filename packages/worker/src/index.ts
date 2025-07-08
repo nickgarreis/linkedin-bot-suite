@@ -40,16 +40,18 @@ console.log(`Concurrency: ${concurrency}`);
 const worker = new Worker<LinkedInJob>(queueName, processJob, {
   connection: { 
     url: process.env.REDIS_URL!,
-    // Enhanced Redis connection options
-    retryDelayOnFailover: 1000,
+    // Enhanced Redis connection options with optimized timeouts
+    retryDelayOnFailover: 100,
     lazyConnect: true,
-    maxRetriesPerRequest: 3,
-    retryDelayOnClusterDown: 1000,
+    maxRetriesPerRequest: 5,
+    retryDelayOnClusterDown: 500,
     enableReadyCheck: true,
     family: 4, // Use IPv4
-    keepAlive: 30000,
-    connectTimeout: 10000,
-    commandTimeout: 5000,
+    keepAlive: 15000,
+    connectTimeout: 5000,
+    commandTimeout: 3000,
+    // Additional stability options
+    enableOfflineQueue: false,
   },
   concurrency: 1, // Reduced concurrency for stability
   prefix: process.env.BULLMQ_PREFIX || 'bull',
@@ -86,7 +88,13 @@ let redisMonitorClient: Redis | null = null;
 
 async function initRedisMonitoring() {
   try {
-    redisMonitorClient = new Redis(process.env.REDIS_URL!);
+    redisMonitorClient = new Redis(process.env.REDIS_URL!, {
+      maxRetriesPerRequest: 3,
+      connectTimeout: 5000,
+      commandTimeout: 2000,
+      enableOfflineQueue: false,
+      lazyConnect: false,
+    });
     
     redisMonitorClient.on('connect', () => {
       console.log('✅ Redis monitor connected successfully');
