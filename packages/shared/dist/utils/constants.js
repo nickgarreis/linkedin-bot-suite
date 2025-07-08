@@ -5,6 +5,7 @@ exports.JOB_TYPES = {
     INVITE: 'invite',
     MESSAGE: 'message',
     PROFILE_VIEW: 'profile_view',
+    API_RESEARCH: 'api_research',
 };
 exports.JOB_STATUS = {
     PENDING: 'pending',

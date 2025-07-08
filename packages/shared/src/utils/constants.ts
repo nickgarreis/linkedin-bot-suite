@@ -2,6 +2,7 @@ export const JOB_TYPES = {
   INVITE: 'invite',
   MESSAGE: 'message',
   PROFILE_VIEW: 'profile_view',
+  API_RESEARCH: 'api_research',
 } as const;
 
 export const JOB_STATUS = {

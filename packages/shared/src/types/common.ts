@@ -37,7 +37,16 @@ export interface ProfileViewJob extends BaseJob {
   n8nWebhookUrl?: string;
 }
 
-export type LinkedInJob = InviteJob | MessageJob | ProfileViewJob;
+export interface ApiResearchJob extends BaseJob {
+  type: 'api_research';
+  profileUrl: string;
+  actions?: ('invite' | 'message')[];
+  accountId?: string;
+  workflowId?: string;
+  n8nWebhookUrl?: string;
+}
+
+export type LinkedInJob = InviteJob | MessageJob | ProfileViewJob | ApiResearchJob;
 
 export interface JobResult {
   success: boolean;

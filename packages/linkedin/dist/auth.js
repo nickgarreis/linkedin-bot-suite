@@ -100,78 +100,143 @@ async function initLinkedInContext(proxy) {
     ];
     const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
     console.log('Using user agent:', randomUserAgent);
-    // Advanced Chrome configuration with session randomization for bot detection evasion
-    const randomViewport = {
-        width: 1920 + Math.floor(Math.random() * 200), // 1920-2120px width variation
-        height: 1080 + Math.floor(Math.random() * 200) // 1080-1280px height variation
-    };
-    // Randomize some browser arguments for session variation
-    const randomArgs = [
-        // Memory and performance randomization
-        `--max_old_space_size=${4096 + Math.floor(Math.random() * 2048)}`, // 4-6GB variation
-        `--memory-pressure-threshold=${100 + Math.floor(Math.random() * 50)}`, // Memory threshold variation
-        // Timing randomization
-        `--renderer-process-limit=${2 + Math.floor(Math.random() * 3)}`, // 2-4 renderer processes
-        // Feature randomization (some enabled, some disabled randomly)
-        ...(Math.random() > 0.5 ? ['--enable-features=WebRTCPipeWireCapturer'] : []),
-        ...(Math.random() > 0.5 ? ['--disable-features=AutoplayIgnoreWebAudio'] : [])
+    // Progressive fallback launch configurations
+    const launchConfigs = [
+        {
+            name: 'conservative',
+            headless: 'new',
+            protocolTimeout: 180000, // 3 minutes
+            args: [
+                // Essential container security
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-gpu-sandbox',
+                // User data (required)
+                `--user-data-dir=${userDataDir}`,
+                // Memory optimization
+                '--memory-pressure-off',
+                // Network configuration for containers
+                '--disable-features=NetworkService',
+                '--enable-features=NetworkServiceInProcess',
+                '--ignore-certificate-errors-spki-list',
+                '--ignore-ssl-errors',
+                '--ignore-certificate-errors',
+                '--disable-site-isolation-trials',
+                '--disable-features=BlockInsecurePrivateNetworkRequests',
+                '--aggressive-cache-discard',
+                '--disable-background-networking',
+                // Fixed window size (no randomization for stability)
+                '--window-size=1920,1080',
+                '--start-maximized',
+                // Bot detection evasion
+                '--disable-blink-features=AutomationControlled',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process',
+                // Performance optimization
+                '--disable-features=VizDisplayCompositor,TranslateUI,BlinkGenPropertyTrees',
+                '--disable-ipc-flooding-protection',
+                '--no-default-browser-check',
+                '--no-first-run',
+                '--disable-default-apps',
+                '--disable-background-timer-throttling',
+                '--disable-renderer-backgrounding',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-extensions',
+                '--disable-plugins',
+                ...(proxy ? [`--proxy-server=${proxy}`] : [])
+            ]
+        },
+        {
+            name: 'ultra-conservative',
+            headless: 'new',
+            protocolTimeout: 300000, // 5 minutes
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                `--user-data-dir=${userDataDir}`,
+                '--disable-features=VizDisplayCompositor',
+                '--memory-pressure-off',
+                '--disable-background-networking',
+                '--window-size=1920,1080',
+                ...(proxy ? [`--proxy-server=${proxy}`] : [])
+            ]
+        },
+        {
+            name: 'minimal',
+            headless: true, // Old headless mode
+            protocolTimeout: 600000, // 10 minutes
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                `--user-data-dir=${userDataDir}`,
+                ...(proxy ? [`--proxy-server=${proxy}`] : [])
+            ]
+        }
     ];
-    const launchOptions = {
-        headless: 'new',
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
-        protocolTimeout: 180000, // Reduced from 5min to 3min for faster failures
-        args: [
-            // Essential container security
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--disable-gpu-sandbox',
-            // User data (required)
-            `--user-data-dir=${userDataDir}`,
-            // JavaScript and automation detection evasion
-            '--enable-javascript',
-            '--disable-blink-features=AutomationControlled', // Critical: Hide automation markers
-            '--disable-web-security', // Required for LinkedIn cross-origin resources
-            '--allow-running-insecure-content',
-            // Network configuration for containers (CRITICAL for LinkedIn)
-            '--disable-features=NetworkService',
-            '--enable-features=NetworkServiceInProcess',
-            '--ignore-certificate-errors-spki-list',
-            '--ignore-ssl-errors',
-            '--ignore-certificate-errors',
-            '--disable-site-isolation-trials',
-            '--disable-features=BlockInsecurePrivateNetworkRequests',
-            '--aggressive-cache-discard',
-            '--disable-background-networking',
-            // Rendering and performance optimization
-            '--disable-features=VizDisplayCompositor,TranslateUI,BlinkGenPropertyTrees',
-            '--disable-ipc-flooding-protection',
-            '--memory-pressure-off',
-            '--no-default-browser-check',
-            '--no-first-run',
-            '--disable-default-apps',
-            '--disable-background-timer-throttling',
-            '--disable-renderer-backgrounding',
-            '--disable-backgrounding-occluded-windows',
-            // Enhanced bot detection evasion with randomization
-            `--window-size=${randomViewport.width},${randomViewport.height}`,
-            '--start-maximized',
-            '--disable-extensions',
-            '--disable-plugins',
-            '--disable-features=IsolateOrigins,site-per-process', // Stability for dynamic content
-            // Add randomized arguments for session variation
-            ...randomArgs,
-            ...(proxy ? [`--proxy-server=${proxy}`] : [])
-        ]
-    };
-    console.log(`🎲 Session randomization: ${randomViewport.width}x${randomViewport.height} viewport, ${randomArgs.length} random args`);
+    console.log('🎲 Using progressive fallback Chrome launch strategy');
     let browser = null;
     let page = null;
+    // Verify Chrome binary exists and is executable
     try {
-        console.log('Launching Chrome browser with minimal configuration...');
-        browser = await pptr.launch(launchOptions);
-        console.log('✅ Browser launched successfully');
+        const fs = await Promise.resolve().then(() => __importStar(require('fs')));
+        const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable';
+        if (!fs.existsSync(executablePath)) {
+            throw new Error(`Chrome binary not found at ${executablePath}`);
+        }
+        console.log(`✅ Chrome binary verified at ${executablePath}`);
+    }
+    catch (binaryError) {
+        throw new Error(`Chrome binary verification failed: ${binaryError}`);
+    }
+    // Progressive fallback launch strategy
+    for (let attempt = 0; attempt < launchConfigs.length; attempt++) {
+        const config = launchConfigs[attempt];
+        const launchOptions = {
+            headless: config.headless,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
+            protocolTimeout: config.protocolTimeout,
+            args: config.args
+        };
+        try {
+            console.log(`Attempt ${attempt + 1}: Launching Chrome with ${config.name} configuration...`);
+            console.log(`Protocol timeout: ${config.protocolTimeout}ms, Args: ${config.args.length}`);
+            browser = await pptr.launch(launchOptions);
+            console.log(`✅ Browser launched successfully with ${config.name} configuration`);
+            // Verify browser process is healthy
+            const browserProcess = browser.process();
+            if (browserProcess) {
+                console.log(`✅ Browser process PID: ${browserProcess.pid}`);
+            }
+            break; // Success - exit loop
+        }
+        catch (launchError) {
+            console.error(`❌ Launch attempt ${attempt + 1} (${config.name}) failed:`, launchError instanceof Error ? launchError.message : launchError);
+            if (browser) {
+                try {
+                    await browser.close();
+                }
+                catch (closeError) {
+                    console.warn('Failed to close browser after launch failure:', closeError);
+                }
+                browser = null;
+            }
+            // If this was the last attempt, throw the error
+            if (attempt === launchConfigs.length - 1) {
+                throw launchError;
+            }
+            // Wait before next attempt
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+    }
+    if (!browser) {
+        throw new Error('All Chrome launch attempts failed');
+    }
+    try {
         // Check browser health before proceeding
         const browserHealthy = await (0, browserHealth_1.checkBrowserHealth)(browser);
         if (!browserHealthy) {
@@ -193,8 +258,8 @@ async function initLinkedInContext(proxy) {
             console.warn('⚠️ User agent configuration failed, using browser default:', userAgentError.message);
         }
         // Set aggressive timeouts for fast execution
-        page.setDefaultNavigationTimeout(25000); // Reduced from 60s to 25s for speed
-        page.setDefaultTimeout(25000); // Reduced from 60s to 25s for speed
+        page.setDefaultNavigationTimeout(20000); // Reduced from 25s to 20s for speed
+        page.setDefaultTimeout(20000); // Reduced from 25s to 20s for speed
         // REMOVED: Viewport configuration completely to prevent Chrome session closure
         // Chrome will use default viewport settings
         console.log('✅ Using default Chrome viewport (no custom configuration)');

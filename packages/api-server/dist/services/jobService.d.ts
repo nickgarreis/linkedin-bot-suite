@@ -7,7 +7,7 @@ export declare class JobService {
         jobId: string;
         queueId: string | undefined;
         status: string;
-        type: "message" | "invite" | "profile_view";
+        type: "message" | "invite" | "profile_view" | "api_research";
         profileUrl: string;
     }>;
     createBulkJobs(jobs: LinkedInJob[], clientSlug: string, workflowId?: string): Promise<{
@@ -19,7 +19,7 @@ export declare class JobService {
             jobId: string;
             queueId: string | undefined;
             status: string;
-            type: "message" | "invite" | "profile_view";
+            type: "message" | "invite" | "profile_view" | "api_research";
             profileUrl: string;
         } | {
             error: string;

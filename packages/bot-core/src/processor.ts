@@ -1,5 +1,5 @@
 import { Job } from 'bullmq';
-import { initLinkedInContext, sendInvitation, sendMessage, viewProfile, checkPageHealth, checkBrowserHealth, cleanupUserDataDir, categorizeError } from '@linkedin-bot-suite/linkedin';
+import { initLinkedInContext, sendInvitation, sendMessage, viewProfile, checkPageHealth, checkBrowserHealth, cleanupUserDataDir, categorizeError, sendHybridInvitation, researchLinkedInAPIs, sendInvitationWithAdvancedDiagnostics } from '@linkedin-bot-suite/linkedin';
 import { LinkedInJob, JOB_TYPES } from '@linkedin-bot-suite/shared';
 import { WebhookService } from './services/webhookService';
 import { Browser, Page } from 'puppeteer';
@@ -126,7 +126,16 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
 
     switch (jobData.type) {
       case JOB_TYPES.INVITE:
-        result = await sendInvitation(page, jobData.profileUrl, jobData.note);
+        // Use hybrid invitation system (GraphQL + DOM fallback)
+        const enableAdvancedDiagnostics = process.env.LINKEDIN_ADVANCED_DIAGNOSTICS === 'true';
+        
+        if (enableAdvancedDiagnostics) {
+          console.log('🔬 Using advanced diagnostics mode for invitation');
+          result = await sendInvitationWithAdvancedDiagnostics(page, jobData.profileUrl, jobData.note);
+        } else {
+          console.log('🚀 Using hybrid invitation system (GraphQL + DOM fallback)');
+          result = await sendHybridInvitation(page, jobData.profileUrl, jobData.note);
+        }
         break;
       
       case JOB_TYPES.MESSAGE:
@@ -135,6 +144,13 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
       
       case JOB_TYPES.PROFILE_VIEW:
         result = await viewProfile(page, jobData.profileUrl);
+        break;
+      
+      case JOB_TYPES.API_RESEARCH:
+        console.log('🔬 Starting LinkedIn API research mode');
+        const researchActions = (jobData as any).actions || ['invite', 'message'];
+        result = await researchLinkedInAPIs(page, jobData.profileUrl);
+        console.log('📊 API research completed');
         break;
       
       default:

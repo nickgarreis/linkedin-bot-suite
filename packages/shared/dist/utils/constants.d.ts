@@ -2,6 +2,7 @@ export declare const JOB_TYPES: {
     readonly INVITE: "invite";
     readonly MESSAGE: "message";
     readonly PROFILE_VIEW: "profile_view";
+    readonly API_RESEARCH: "api_research";
 };
 export declare const JOB_STATUS: {
     readonly PENDING: "pending";

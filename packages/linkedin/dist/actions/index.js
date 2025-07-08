@@ -1,12 +1,16 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.categorizeError = exports.safeEvaluate = exports.cleanupUserDataDir = exports.safeNavigate = exports.waitForPageHealth = exports.checkBrowserHealth = exports.checkPageHealth = exports.viewProfile = exports.sendMessage = exports.sendInvitation = void 0;
+exports.categorizeError = exports.safeEvaluate = exports.cleanupUserDataDir = exports.safeNavigate = exports.waitForPageHealth = exports.checkBrowserHealth = exports.checkPageHealth = exports.sendInvitationWithAdvancedDiagnostics = exports.researchLinkedInAPIs = exports.sendHybridInvitation = exports.viewProfile = exports.sendMessage = exports.sendInvitation = void 0;
 var invite_1 = require("./invite");
 Object.defineProperty(exports, "sendInvitation", { enumerable: true, get: function () { return invite_1.sendInvitation; } });
 var message_1 = require("./message");
 Object.defineProperty(exports, "sendMessage", { enumerable: true, get: function () { return message_1.sendMessage; } });
 var profile_1 = require("./profile");
 Object.defineProperty(exports, "viewProfile", { enumerable: true, get: function () { return profile_1.viewProfile; } });
+var hybrid_invite_1 = require("./hybrid-invite");
+Object.defineProperty(exports, "sendHybridInvitation", { enumerable: true, get: function () { return hybrid_invite_1.sendHybridInvitation; } });
+Object.defineProperty(exports, "researchLinkedInAPIs", { enumerable: true, get: function () { return hybrid_invite_1.researchLinkedInAPIs; } });
+Object.defineProperty(exports, "sendInvitationWithAdvancedDiagnostics", { enumerable: true, get: function () { return hybrid_invite_1.sendInvitationWithAdvancedDiagnostics; } });
 var browserHealth_1 = require("../utils/browserHealth");
 Object.defineProperty(exports, "checkPageHealth", { enumerable: true, get: function () { return browserHealth_1.checkPageHealth; } });
 Object.defineProperty(exports, "checkBrowserHealth", { enumerable: true, get: function () { return browserHealth_1.checkBrowserHealth; } });
