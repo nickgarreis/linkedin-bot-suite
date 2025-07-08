@@ -8,6 +8,11 @@ const dotenv_1 = require("dotenv");
 const bot_core_1 = require("@linkedin-bot-suite/bot-core");
 const node_fetch_1 = __importDefault(require("node-fetch"));
 (0, dotenv_1.config)();
+// Global unhandled rejection handler to prevent worker crashes
+process.on('unhandledRejection', (err) => {
+    console.error('⚠️ Unhandled promise rejection:', err);
+    // Log but don't crash - let BullMQ handle job failure gracefully
+});
 async function validateCookies() {
     try {
         const cookies = process.env.LINKEDIN_COOKIES_JSON || '[]';

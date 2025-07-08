@@ -7,6 +7,12 @@ import Redis from 'ioredis';
 
 config();
 
+// Global unhandled rejection handler to prevent worker crashes
+process.on('unhandledRejection', (err) => {
+  console.error('⚠️ Unhandled promise rejection:', err);
+  // Log but don't crash - let BullMQ handle job failure gracefully
+});
+
 async function validateCookies(): Promise<boolean> {
   try {
     const cookies = process.env.LINKEDIN_COOKIES_JSON || '[]';

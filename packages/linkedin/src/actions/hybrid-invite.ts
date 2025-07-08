@@ -16,7 +16,7 @@ export async function sendHybridInvitation(
 ): Promise<{ success: boolean; message: string; profileUrl: string; actionTaken: 'invited' | 'messaged'; method: 'graphql' | 'dom' }> {
   
   console.log('🚀 Starting hybrid invitation system...');
-  console.log(`🔬 Research mode: ${process.env.LINKEDIN_GRAPHQL_RESEARCH === 'true' ? 'ENABLED' : 'DISABLED'}`);
+  console.log(`🔬 Diagnostics mode: ${process.env.LINKEDIN_DIAGNOSTICS === '1' ? 'ENABLED' : 'DISABLED'}`);
   console.log(`📊 Advanced diagnostics: ${process.env.LINKEDIN_ADVANCED_DIAGNOSTICS === 'true' ? 'ENABLED' : 'DISABLED'}`);
   
   // Enforce request spacing
@@ -37,10 +37,10 @@ export async function sendHybridInvitation(
     await new Promise(resolve => setTimeout(resolve, 3000));
     
     // Check if we need to research the GraphQL APIs first
-    const shouldResearch = process.env.LINKEDIN_GRAPHQL_RESEARCH === 'true';
+    const shouldResearch = process.env.LINKEDIN_DIAGNOSTICS === '1';
     
     if (shouldResearch) {
-      console.log('🔬 Research mode: Attempting GraphQL research...');
+      console.log('🔬 Diagnostics mode: Attempting GraphQL research...');
       
       try {
         // Research GraphQL APIs by performing real actions

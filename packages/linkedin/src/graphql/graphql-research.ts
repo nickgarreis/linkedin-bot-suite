@@ -32,6 +32,8 @@ export class LinkedInGraphQLResearcher {
   private interceptedCalls: InterceptedCall[] = [];
   private isIntercepting = false;
   private interceptionEnabled = false;
+  private requestListener?: (req: any) => void;
+  private responseListener?: (res: any) => void;
 
   /**
    * Start intercepting network requests to capture GraphQL API calls
@@ -56,8 +58,8 @@ export class LinkedInGraphQLResearcher {
       // Continue without interception - we can still perform actions and analyze results
     }
 
-    // Intercept requests (only if interception is enabled)
-    page.on('request', (request) => {
+    // Store the request listener for proper cleanup
+    this.requestListener = (request) => {
       if (!this.interceptionEnabled) {
         return;
       }
@@ -104,17 +106,19 @@ export class LinkedInGraphQLResearcher {
         console.log(`📡 Intercepted ${interceptedCall.type} call: ${interceptedCall.operation || 'unknown'}`);
       }
 
-      // Continue with the request (only if interception is enabled)
-      try {
-        request.continue();
-      } catch (error) {
-        // Request may have already been handled if interception failed
-        console.warn('⚠️ Failed to continue request:', (error as Error).message);
+      // CRITICAL FIX: Always attach .catch() to prevent unhandled promise rejections
+      if (this.interceptionEnabled && !request.isInterceptResolutionHandled()) {
+        request
+          .continue()
+          .catch((err: Error) => console.warn('⚠️ request.continue() failed:', err.message));
       }
-    });
+    };
 
-    // Intercept responses (only if interception is enabled)
-    page.on('response', async (response) => {
+    // Register the request listener
+    page.on('request', this.requestListener);
+
+    // Store the response listener for proper cleanup
+    this.responseListener = async (response) => {
       if (!this.interceptionEnabled) {
         return;
       }
@@ -146,7 +150,10 @@ export class LinkedInGraphQLResearcher {
           console.warn('Failed to capture response:', error);
         }
       }
-    });
+    };
+
+    // Register the response listener
+    page.on('response', this.responseListener);
 
     console.log('🔬 GraphQL interception started');
   }
@@ -159,18 +166,27 @@ export class LinkedInGraphQLResearcher {
       return;
     }
 
-    // Only try to disable interception if it was enabled
-    if (this.interceptionEnabled) {
-      try {
-        await page.setRequestInterception(false);
-        console.log('🔬 GraphQL interception stopped');
-      } catch (error) {
-        console.warn('⚠️ Failed to disable request interception:', (error as Error).message);
-      }
-    }
-    
-    this.isIntercepting = false;
+    // Mark disabled BEFORE calling setRequestInterception(false) so request listeners will ignore late events
     this.interceptionEnabled = false;
+
+    try {
+      await page.setRequestInterception(false);
+    } catch (error) {
+      console.warn('⚠️ Failed to disable request interception:', (error as Error).message);
+    }
+
+    // Remove event listeners to prevent leaks and further continues
+    if (this.requestListener) {
+      page.off('request', this.requestListener);
+      this.requestListener = undefined;
+    }
+    if (this.responseListener) {
+      page.off('response', this.responseListener);
+      this.responseListener = undefined;
+    }
+
+    console.log('🔬 GraphQL interception stopped');
+    this.isIntercepting = false;
   }
 
   /**
@@ -358,6 +374,14 @@ export async function researchLinkedInGraphQL(
     // Check if interception is working
     if (!researcher.isInterceptionEnabled()) {
       console.log('⚠️ Network interception not available - research will analyze button interactions only');
+      // Return minimal report when interception is disabled
+      return {
+        calls: [],
+        invitations: [],
+        messages: [],
+        auth: {},
+        report: 'GraphQL research disabled - network interception unavailable. This is normal and jobs will continue to work.'
+      };
     }
     
     // Perform actions to trigger GraphQL calls
