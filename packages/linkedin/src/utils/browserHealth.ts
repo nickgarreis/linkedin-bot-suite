@@ -365,6 +365,7 @@ export function categorizeError(error: Error): ErrorCategory {
       message.includes('network') ||
       message.includes('net::err_aborted') ||
       message.includes('err_aborted') ||
+      message.includes('aborted') ||
       message.includes('net::err_blocked') ||
       message.includes('net::err_failed') ||
       message.includes('net::err_network_changed') ||
