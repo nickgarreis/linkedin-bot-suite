@@ -359,15 +359,21 @@ export function categorizeError(error: Error): ErrorCategory {
     };
   }
   
-  // Connection issues
+  // Connection and network issues (including LinkedIn blocking)
   if (message.includes('connection') || 
       message.includes('timeout') ||
-      message.includes('network')) {
+      message.includes('network') ||
+      message.includes('net::err_aborted') ||
+      message.includes('err_aborted') ||
+      message.includes('net::err_blocked') ||
+      message.includes('net::err_failed') ||
+      message.includes('net::err_network_changed') ||
+      message.includes('net::err_internet_disconnected')) {
     return {
       type: 'connection_lost',
       recoverable: true,
       retryable: true,
-      description: 'Network or connection issues'
+      description: 'Network or connection issues (possible LinkedIn blocking or rate limiting)'
     };
   }
   

@@ -4,7 +4,35 @@ export async function viewProfile(
   page: Page,
   profileUrl: string
 ): Promise<{ success: boolean; message: string; profileUrl: string; profileData?: any }> {
-  await page.goto(profileUrl, { waitUntil: 'networkidle0' });
+  // Validate profile URL
+  if (!profileUrl || !profileUrl.includes('linkedin.com/in/')) {
+    throw new Error(`Invalid LinkedIn profile URL: ${profileUrl}`);
+  }
+  
+  console.log(`Viewing profile: ${profileUrl}`);
+  
+  // Add random delay to simulate human behavior
+  const randomDelay = Math.floor(Math.random() * 2000) + 1000;
+  await new Promise(resolve => setTimeout(resolve, randomDelay));
+  
+  try {
+    const response = await page.goto(profileUrl, { 
+      waitUntil: 'domcontentloaded', 
+      timeout: 30000 
+    });
+    
+    if (!response || response.status() >= 400) {
+      throw new Error(`Navigation failed with status: ${response?.status() || 'No response'}`);
+    }
+    
+    // Verify we're on the correct page
+    const currentUrl = page.url();
+    if (!currentUrl.includes('linkedin.com/in/') || currentUrl.includes('/login')) {
+      throw new Error(`Navigation redirected to unexpected page: ${currentUrl}`);
+    }
+  } catch (error) {
+    throw new Error(`Failed to navigate to profile: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 
   try {
     // Wait for the profile to load
