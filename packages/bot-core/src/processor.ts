@@ -55,8 +55,8 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
     // Update job status to processing
     await webhookService.updateJobStatus(jobId, 'processing');
 
-    // Set job timeout (5 minutes max per job)
-    const jobTimeoutMs = 5 * 60 * 1000; // 5 minutes
+    // Set job timeout (2 minutes max per job) - reduced from 5 minutes to prevent SIGTERM
+    const jobTimeoutMs = 2 * 60 * 1000; // 2 minutes
     jobTimeout = setTimeout(() => {
       const error = new Error(`Job ${jobId} timed out after ${jobTimeoutMs/1000} seconds`);
       console.error(`[bot-core] Job timeout: ${jobId}, timeout: ${jobTimeoutMs}ms`);
@@ -64,58 +64,47 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
     }, jobTimeoutMs);
 
     // Add heartbeat interval to prevent job stalling with enhanced memory monitoring
-    heartbeat = setInterval(() => {
+    heartbeat = setInterval(async () => {
       const currentMemory = process.memoryUsage();
       const memoryIncrease = {
         rss: Math.round((currentMemory.rss - startMemory.rss) / 1024 / 1024),
-        heapUsed: Math.round((currentMemory.heapUsed - startMemory.heapUsed) / 1024 / 1024),
-        heapTotal: Math.round((currentMemory.heapTotal - startMemory.heapTotal) / 1024 / 1024)
+        heapUsed: Math.round((currentMemory.heapUsed - startMemory.heapUsed) / 1024 / 1024)
       };
       
       job.updateProgress(50); // Keep job alive
       console.log(`Heartbeat for job ${jobId} - Memory delta: RSS +${memoryIncrease.rss}MB, Heap +${memoryIncrease.heapUsed}MB`);
       
-      // Stricter memory leak detection and prevention
-      if (memoryIncrease.rss > 200) { // Critical memory usage - reduced from 300MB
-        console.error(`⚠️ CRITICAL: Job ${jobId} using excessive memory: +${memoryIncrease.rss}MB RSS - force terminating job`);
-        throw new Error(`Job terminated due to excessive memory usage: +${memoryIncrease.rss}MB RSS`);
-      } else if (memoryIncrease.rss > 150) { // Warning threshold - reduced from 200MB
-        console.warn(`⚠️ Job ${jobId} using high memory: +${memoryIncrease.rss}MB RSS`);
-        
-        // Force garbage collection if available
-        if (global.gc) {
-          console.log('Running garbage collection...');
-          global.gc();
+      // Force GC if memory is high
+      if (memoryIncrease.rss > 100 && global.gc) {
+        console.log('Force garbage collection');
+        global.gc();
+      }
+      
+      // Close extra pages to prevent memory leaks
+      if (browser?.isConnected()) {
+        const pages = await browser.pages();
+        if (pages.length > 1) {
+          for (let i = 1; i < pages.length; i++) {
+            try {
+              await pages[i].close();
+            } catch {}
+          }
         }
       }
       
-      // Check browser health if available
-      if (browser && browser.isConnected()) {
-        browser.pages().then(pages => {
-          console.log(`Browser has ${pages.length} pages open`);
-          // Close any extra pages beyond the main one
-          if (pages.length > 2) {
-            console.warn(`Too many browser pages open (${pages.length}), closing extras`);
-            pages.slice(2).forEach(async (extraPage) => {
-              try {
-                if (!extraPage.isClosed()) {
-                  await extraPage.close();
-                }
-              } catch (err) {
-                console.error('Failed to close extra page:', err);
-              }
-            });
-          }
-        }).catch(err => console.error('Failed to check browser pages:', err));
+      // Stricter memory leak detection and prevention
+      if (memoryIncrease.rss > 150) { // Reduced from 200MB
+        console.error(`⚠️ CRITICAL: Job ${jobId} using excessive memory: +${memoryIncrease.rss}MB RSS - force terminating job`);
+        throw new Error(`Job terminated due to excessive memory usage: +${memoryIncrease.rss}MB RSS`);
       }
-    }, 10000); // Every 10 seconds
+    }, 5000); // Every 5 seconds instead of 10
 
     // Initialize browser context with timeout
     console.log('Initializing browser context...');
     const initResult = await Promise.race([
       initLinkedInContext(process.env.PROXY_URL ?? ''),
       new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Browser initialization timeout')), 60000)  // Reduced from 90s to 60s
+        setTimeout(() => reject(new Error('Browser initialization timeout')), 45000)  // Reduced from 60s to 45s
       )
     ]);
     

@@ -58,7 +58,9 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     CHROME_DEVEL_SANDBOX=/usr/bin/google-chrome-stable \
     CHROME_USER_DATA_DIR=/tmp/chrome-user-data \
     DISPLAY=:99 \
-    DBUS_SESSION_BUS_ADDRESS=/dev/null
+    DBUS_SESSION_BUS_ADDRESS=/dev/null \
+    NODE_OPTIONS="--max-old-space-size=512 --expose-gc" \
+    PUPPETEER_DISABLE_HEADLESS_WARNING=true
 
 # Create app directory
 WORKDIR /app

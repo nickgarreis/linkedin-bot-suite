@@ -1,6 +1,6 @@
 import { Page } from 'puppeteer';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
-import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady, linkedInTyping, getActivityPattern, resetSessionState, waitForLinkedInPageLoad, waitForProfilePageReady, analyzePageStructure, validateProfilePage, waitForPageStability, monitorPageStability, optimizeMemoryUsage, smartHumanDelay, recoverFromBigpipeStuck, safeEvaluate } from '../utils/browserHealth';
+import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady, linkedInTyping, getActivityPattern, resetSessionState, waitForLinkedInPageLoad, waitForProfilePageReady, analyzePageStructure, validateProfilePage, waitForPageStability, monitorPageStability, optimizeMemoryUsage, smartHumanDelay, recoverFromBigpipeStuck, safeEvaluate, withContextRecovery } from '../utils/browserHealth';
 import { sendMessage } from './message';
 
 export async function sendInvitation(
@@ -26,387 +26,131 @@ export async function sendInvitation(
   const navigationDelay = smartHumanDelay(800, 'fast'); // Exponentially biased toward faster execution
   await new Promise(resolve => setTimeout(resolve, navigationDelay));
   
-  // Use more flexible navigation strategy with retry logic
-  let navigationSuccess = false;
-  let lastError: Error | null = null;
-  
-  const navigationStrategies = [
-    { waitUntil: 'domcontentloaded' as const, timeout: 30000 },
-    { waitUntil: 'load' as const, timeout: 45000 },
-    { waitUntil: 'networkidle2' as const, timeout: 60000 }
-  ];
-  
-  for (const strategy of navigationStrategies) {
-    try {
-      console.log(`Attempting navigation with strategy: ${strategy.waitUntil}, timeout: ${strategy.timeout}ms`);
-      const response = await page.goto(profileUrl, strategy);
-      
-      if (!response) {
-        throw new Error('Navigation returned no response');
-      }
-      
-      if (response.status() >= 400) {
-        throw new Error(`Navigation failed with HTTP ${response.status()}`);
-      }
-      
-      // Check if we actually landed on the profile page
-      const currentUrl = page.url();
-      if (!currentUrl.includes('linkedin.com/in/') || currentUrl.includes('/login') || currentUrl.includes('/authwall')) {
-        throw new Error(`Navigation redirected to unexpected page: ${currentUrl}`);
-      }
-      
-      navigationSuccess = true;
-      console.log(`Navigation successful with strategy: ${strategy.waitUntil}`);
-      break;
-      
-    } catch (error) {
-      lastError = error as Error;
-      console.warn(`Navigation failed with strategy ${strategy.waitUntil}:`, lastError.message);
-      
-      // Add delay before trying next strategy
-      if (strategy !== navigationStrategies[navigationStrategies.length - 1]) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-    }
+  // Single navigation attempt with best strategy
+  try {
+    console.log('Navigating to profile page...');
+    await page.goto(profileUrl, {
+      waitUntil: 'domcontentloaded',
+      timeout: 20000 // Reduced from 30s
+    });
+  } catch (navError) {
+    console.warn('First navigation attempt failed, trying with networkidle...');
+    // Try once more with networkidle
+    await page.goto(profileUrl, {
+      waitUntil: 'networkidle2',
+      timeout: 25000
+    });
   }
-  
-  if (!navigationSuccess) {
-    throw new Error(`Failed to navigate to profile after trying all strategies. Last error: ${lastError?.message || 'Unknown error'}`);
+
+  // Quick URL check
+  const currentUrl = page.url();
+  if (currentUrl.includes('/login') || currentUrl.includes('/authwall')) {
+    throw new Error(`Redirected to login: ${currentUrl}`);
   }
 
   try {
-    // Enhanced page loading with context destruction recovery
-    console.log('Validating LinkedIn page loading with recovery mechanisms...');
+    // Simplified page validation - just wait a bit and check basics
+    console.log('Validating LinkedIn page loading...');
+    await new Promise(resolve => setTimeout(resolve, 2000));
     
-    let validationAttempts = 0;
-    const maxValidationAttempts = 2;
-    let pageValidated = false;
+    const pageReady = await waitForLinkedInPageLoad(page, 'profile', 6000);
+    if (!pageReady) {
+      // Don't retry, just proceed
+      console.warn('Page validation failed but proceeding');
+    }
     
-    while (!pageValidated && validationAttempts < maxValidationAttempts) {
-      try {
-        validationAttempts++;
-        console.log(`Page validation attempt ${validationAttempts}/${maxValidationAttempts}`);
-        
-        // Step 1: Basic page loading with aggressive timeout for speed
-        const pageLoaded = await waitForLinkedInPageLoad(page, 'profile', 8000); // Reduced from 15s to 8s
-        if (!pageLoaded) {
-          if (validationAttempts >= maxValidationAttempts) {
-            console.log('Basic page loading failed, analyzing page structure...');
-            await analyzePageStructure(page);
-            throw new Error('LinkedIn profile page failed to load properly after multiple attempts');
-          }
-          console.warn('Page loading failed, retrying...');
-          await new Promise(resolve => setTimeout(resolve, 1000)); // Reduced retry wait from 2s to 1s
-          continue;
-        }
-        
-        // Step 2: Enhanced profile validation with graceful fallback
-        console.log('Running enhanced profile validation...');
-        const profileValidation = await validateProfilePage(page);
-        
-        console.log(`Profile validation result: valid=${profileValidation.isValid}, confidence=${profileValidation.confidence}, strategy=${profileValidation.strategy}`);
-        
-        // Graceful fallback strategy based on confidence levels
-        if (!profileValidation.isValid) {
-          if (profileValidation.confidence < 0.2 && validationAttempts >= maxValidationAttempts) {
-            // Very low confidence - likely not a profile page
-            console.log('Running detailed page analysis before failing...');
-            const analysis = await analyzePageStructure(page);
-            console.log('Page analysis results:', JSON.stringify(analysis, null, 2));
-            throw new Error(`Profile page validation failed - very low confidence (${profileValidation.confidence}) after ${validationAttempts} attempts`);
-          } else if (profileValidation.confidence < 0.2) {
-            console.warn('Very low confidence validation, retrying...');
-            await new Promise(resolve => setTimeout(resolve, 1500)); // Reduced from 3s to 1.5s
-            continue;
-          } else if (profileValidation.confidence < 0.4 && validationAttempts >= maxValidationAttempts) {
-            // Medium confidence - might be a profile page, try to proceed with caution
-            console.warn(`⚠️ Low confidence profile validation (${profileValidation.confidence}) but attempting to proceed...`);
-            console.log('Running page analysis for debugging...');
-            await analyzePageStructure(page);
-            // Continue with execution but add extra validation later
-          } else if (profileValidation.confidence < 0.4) {
-            console.warn('Low confidence validation, retrying once more...');
-            await new Promise(resolve => setTimeout(resolve, 1000)); // Reduced from 2s to 1s
-            continue;
-          } else {
-            console.warn(`⚠️ Medium confidence (${profileValidation.confidence}) but proceeding...`);
-          }
-        } else {
-          console.log(`✅ Profile validated successfully (confidence: ${profileValidation.confidence})`);
-        }
-        
-        pageValidated = true;
-        
-      } catch (error) {
-        const errorMessage = (error as Error).message;
-        if (errorMessage.includes('Execution context was destroyed') || 
-            errorMessage.includes('Target closed') ||
-            errorMessage.includes('Session closed')) {
-          console.warn(`Context destruction detected on attempt ${validationAttempts}, retrying...`);
-          if (validationAttempts < maxValidationAttempts) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            continue;
-          }
-        }
-        throw error;
-      }
+    // Quick check for connection state
+    console.log('Checking connection state...');
+    let isConnected = false;
+    try {
+      await page.waitForSelector('button[aria-label*="Message"]', { timeout: 2000 });
+      isConnected = true;
+      console.log('✅ User is already connected');
+    } catch {
+      console.log('User not connected, proceeding with invitation');
     }
 
-    // Skip aggressive page stability monitoring to prevent context destruction
-    console.log('Using lightweight element check instead of stability monitoring...');
-    
-    // Simple element existence check with human-like delay
-    const elementCheckDelay = 500 + Math.random() * 1500; // 500-2000ms random delay
-    await new Promise(resolve => setTimeout(resolve, elementCheckDelay));
-    
-    let hasBasicElements = false;
-    try {
-      const basicCheck = await safeEvaluate(page, () => ({
-        hasButtons: document.querySelectorAll('button').length > 0,
-        hasMainContent: !!document.querySelector('main, .scaffold-layout__main'),
-        elementCount: document.querySelectorAll('*').length
-      }), 2000);
-      
-      hasBasicElements = basicCheck && typeof basicCheck === 'object' && 
-                        'hasButtons' in basicCheck && basicCheck.hasButtons && 
-                        'hasMainContent' in basicCheck && basicCheck.hasMainContent && 
-                        'elementCount' in basicCheck && basicCheck.elementCount > 200;
-      
-      if (hasBasicElements) {
-        console.log('✅ Basic page elements confirmed, proceeding');
-      } else {
-        console.warn('⚠️ Limited page elements detected, but proceeding with caution');
-      }
-    } catch (error) {
-      console.warn('Element check failed, proceeding anyway:', (error as Error).message);
-    }
-    
-    // Smart connection state detection with auto-fallback to messaging
-    console.log('Checking connection state for smart action selection...');
-    let isAlreadyConnected = false;
-    
-    try {
-      const messageSelectors = LINKEDIN_SELECTORS.MESSAGE_BUTTON.split(', ');
-      await waitForButtonWithMultipleSelectors(page, messageSelectors, { 
-        timeout: hasBasicElements ? 2000 : 1500, // Adaptive timeout based on page elements
-        visible: true 
-      });
-      isAlreadyConnected = true;
-      console.log('✅ User is already connected - will send message instead of invitation');
-    } catch (error: any) {
-      console.log('No message button found - user not connected, proceeding with invitation');
-      // Continue with invitation flow
-    }
-    
-    // If already connected, automatically send message instead
-    if (isAlreadyConnected) {
+    if (isConnected && note) {
+      // Already connected, send message
       console.log('🔄 Auto-fallback: Sending message to already connected user...');
-      
-      if (!note || note.trim().length === 0) {
-        // Provide a default professional message if no note was provided
-        note = "Hi! I'd love to connect and potentially explore collaboration opportunities.";
-        console.log('Using default message since no note was provided');
-      }
-      
-      try {
-        const messageResult = await sendMessage(page, profileUrl, note!); // note is guaranteed to be defined here
-        return {
-          success: true,
-          message: `User already connected - message sent successfully: "${note}"`,
-          profileUrl,
-          actionTaken: 'messaged'
-        };
-      } catch (messageError) {
-        console.error('Message fallback failed:', messageError);
-        throw new Error(`User is already connected but message sending failed: ${messageError instanceof Error ? messageError.message : 'Unknown error'}`);
-      }
+      const messageResult = await sendMessage(page, profileUrl, note);
+      return {
+        success: messageResult.success,
+        message: messageResult.message,
+        profileUrl: messageResult.profileUrl,
+        actionTaken: 'messaged' as const
+      };
     }
 
-    // Check for pending invitation state
-    try {
-      const pendingSelectors = [
-        'button[aria-label*="Pending"], button[aria-label*="Ausstehend"]',
-        'button[data-control-name*="pending"]',
-        'button:has-text("Pending"), button:has-text("Ausstehend")'
-      ];
-      await waitForButtonWithMultipleSelectors(page, pendingSelectors, { 
-        timeout: hasBasicElements ? 2000 : 1000, // Adaptive timeout based on page elements
-        visible: true 
-      });
-      throw new Error('Invitation already pending - cannot send duplicate invitation');
-    } catch (error: any) {
-      if (error.message.includes('already pending')) {
-        throw error; // Re-throw if pending
-      }
-      // Continue if pending button not found (good - means no pending invitation)
-    }
-
-    // Multi-stage Connect button discovery with comprehensive analysis
-    console.log('Starting multi-stage Connect button discovery...');
+    // Find and click connect button
+    console.log('Looking for Connect button...');
     let connectButton;
-    
-    // Stage 1: Comprehensive page analysis first
-    console.log('Stage 1: Analyzing page structure before button search...');
-    const preSearchAnalysis = await analyzePageStructure(page);
-    
-    if (!preSearchAnalysis || preSearchAnalysis.buttonAnalysis.totalButtons === 0) {
-      throw new Error('No buttons found on page - page may not have loaded properly or profile is inaccessible');
-    }
-    
-    console.log(`Found ${preSearchAnalysis.buttonAnalysis.totalButtons} total buttons, ${preSearchAnalysis.buttonAnalysis.connectButtons} Connect buttons, ${preSearchAnalysis.buttonAnalysis.messageButtons} Message buttons`);
-    
-    // Stage 2: Human-like wait with randomization
-    console.log('Stage 2: Brief wait for button stability...');
-    const buttonWait = hasBasicElements ? (500 + Math.random() * 1000) : (300 + Math.random() * 500); // Human-like timing
-    await new Promise(resolve => setTimeout(resolve, buttonWait));
-    
-    // Stage 3: Enhanced Connect button search with multiple strategies
-    console.log('Stage 3: Searching for Connect button with enhanced patterns...');
     try {
-      const connectSelectors = LINKEDIN_SELECTORS.CONNECT_BUTTON.split(', ');
-      connectButton = await waitForButtonWithMultipleSelectors(page, connectSelectors, {
-        timeout: hasBasicElements ? 10000 : 6000, // Adaptive timeout based on page elements
-        visible: true,
-        enabled: true
-      });
-      
-      console.log('✅ Connect button found successfully');
-      
-    } catch (error: any) {
-      console.error('Connect button search failed, running final analysis...');
-      
-      // Stage 4: Final comprehensive analysis for debugging
-      const finalAnalysis = await analyzePageStructure(page);
-      
-      console.error('Final button search analysis:', {
-        profileUrl,
-        currentUrl: page.url(),
-        pageTitle: await page.title(),
-        preSearchButtons: preSearchAnalysis.buttonAnalysis.totalButtons,
-        finalButtons: finalAnalysis?.buttonAnalysis.totalButtons || 0,
-        connectButtonsFound: finalAnalysis?.buttonAnalysis.connectButtons || 0,
-        messageButtonsFound: finalAnalysis?.buttonAnalysis.messageButtons || 0,
-        profileStructure: finalAnalysis?.linkedinStructure || {},
-        buttonDetails: finalAnalysis?.buttonAnalysis.buttonDetails || [],
-        originalError: error.message
-      });
-      
-      // Enhanced error handling with smart fallback detection
-      if (finalAnalysis?.buttonAnalysis.messageButtons > 0) {
-        console.log('🔄 Connect button not found, but Message buttons detected - attempting message fallback...');
-        
-        if (!note || note.trim().length === 0) {
-          note = "Hi! I'd love to connect and potentially explore collaboration opportunities.";
-          console.log('Using default message since no note was provided for fallback');
-        }
-        
-        try {
-          const messageResult = await sendMessage(page, profileUrl, note!); // note is guaranteed to be defined here
+      connectButton = await page.waitForSelector(
+        'button[aria-label*="Connect"], button[aria-label*="Invite"]',
+        { timeout: 5000, visible: true }
+      );
+      console.log('✅ Connect button found');
+    } catch (error) {
+      // Try fallback to message if connect not available
+      try {
+        await page.waitForSelector('button[aria-label*="Message"]', { timeout: 2000 });
+        if (note) {
+          console.log('🔄 Connect button not found, falling back to message...');
+          const messageResult = await sendMessage(page, profileUrl, note);
           return {
-            success: true,
-            message: `Connect button not available but user is connected - message sent successfully: "${note}"`,
-            profileUrl,
-            actionTaken: 'messaged'
+            success: messageResult.success,
+            message: messageResult.message,
+            profileUrl: messageResult.profileUrl,
+            actionTaken: 'messaged' as const
           };
-        } catch (messageError) {
-          throw new Error(`User appears connected but both invitation and messaging failed: ${messageError instanceof Error ? messageError.message : 'Unknown error'}`);
         }
-      } else if (finalAnalysis?.linkedinStructure.hasErrorIndicators) {
-        throw new Error('LinkedIn error detected - profile may be unavailable or rate limited');
-      } else if (!finalAnalysis?.linkedinStructure.hasProfileActions) {
-        throw new Error('Profile actions section not found - profile may be private or restricted');
-      } else {
-        throw new Error(`Connect button not found after comprehensive search - found ${finalAnalysis?.buttonAnalysis.totalButtons || 0} total buttons, but no Connect button available`);
+        throw new Error('User is already connected but no message provided');
+      } catch {
+        throw new Error('Neither Connect nor Message button found - profile may be private or restricted');
       }
     }
     
-    // Click the found connect button directly
-    console.log('Connect button found, clicking with human-like timing...');
+    // Click the connect button
+    console.log('Clicking Connect button...');
+    if (!connectButton) {
+      throw new Error('Connect button is null');
+    }
     await connectButton.click();
-    
-    // Add human-like delay after clicking
-    const clickDelay = humanDelay(1000, 50);
-    await new Promise(resolve => setTimeout(resolve, clickDelay));
-    
-    // Wait for invitation modal with human-like timing
-    const modalWaitTime = humanDelay(2000, 50); // Variable 1-3 second wait
-    await new Promise(resolve => setTimeout(resolve, modalWaitTime));
+    await new Promise(resolve => setTimeout(resolve, 1500));
 
+    // Add note if provided
     if (note) {
       try {
-        console.log('Adding personal note to invitation...');
+        console.log('Adding personal note...');
+        const noteButton = await page.waitForSelector('button[aria-label*="Add a note"]', { timeout: 3000 });
+        if (!noteButton) {
+          throw new Error('Note button not found');
+        }
+        await noteButton.click();
+        await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // Use safe element interaction for note button
-        await safeElementInteraction(
-          page,
-          LINKEDIN_SELECTORS.NOTE_BUTTON,
-          async (noteBtn) => {
-            await noteBtn.click();
-            const clickDelay = humanDelay(700, 60); // Variable delay after click
-            await new Promise(resolve => setTimeout(resolve, clickDelay));
-            return true;
-          },
-          { timeout: 8000, retries: 2 }
-        );
-        
-        // Use enhanced LinkedIn-specific typing for note field
-        await safeElementInteraction(
-          page,
-          'textarea[name="message"]',
-          async (noteField) => {
-            await noteField.click({ clickCount: 3 }); // Select all existing text
-            await new Promise(resolve => setTimeout(resolve, humanDelay(200, 40))); // Brief pause after selection
-            
-            // Use LinkedIn-specific typing for note context
-            await linkedInTyping(page, note!, 'note', { 
-              element: noteField
-            });
-            
-            console.log('Personal note added successfully with human-like typing patterns');
-            return true;
-          },
-          { timeout: 8000, retries: 2 } // Increased timeout for longer typing simulation
-        );
-        
-      } catch (error) {
-        console.warn('Note addition failed, proceeding without note:', (error as Error).message);
+        const textarea = await page.waitForSelector('textarea[name="message"]', { timeout: 3000 });
+        if (!textarea) {
+          throw new Error('Textarea not found');
+        }
+        await textarea.type(note, { delay: 50 });
+        console.log('Note added successfully');
+      } catch (noteError) {
+        console.warn('Could not add note:', (noteError as Error).message);
       }
     }
 
-    // Find and click send button with safe interaction
-    console.log('Looking for send button...');
-    await safeElementInteraction(
-      page,
-      LINKEDIN_SELECTORS.SEND_BUTTON,
-      async (sendBtn) => {
-        console.log('Sending invitation...');
-        await sendBtn.click();
-        return true;
-      },
-      { timeout: 10000, retries: 3 }
-    );
-    
-    // Wait for invitation to be processed with human-like timing
-    const confirmationWaitTime = humanDelay(2500, 60); // Variable 1-4 second wait
-    await new Promise(resolve => setTimeout(resolve, confirmationWaitTime));
-    
-    // Verify invitation was sent (check for success indicators)
-    try {
-      // Use page evaluation to check if modal is gone more reliably
-      const modalClosed = await page.evaluate(() => {
-        const modal = document.querySelector('[data-test-modal-id="send-invite-modal"]') as HTMLElement;
-        return !modal || modal.style.display === 'none' || !modal.isConnected;
-      });
-      
-      if (modalClosed) {
-        console.log('Invitation modal closed - invitation likely sent');
-      } else {
-        console.warn('Modal still present, but proceeding as success');
-      }
-    } catch (error) {
-      console.warn('Could not verify invitation modal closure, but proceeding as success');
+    // Send invitation
+    console.log('Sending invitation...');
+    const sendButton = await page.waitForSelector('button[aria-label*="Send"]', { timeout: 5000 });
+    if (!sendButton) {
+      throw new Error('Send button not found');
     }
-
+    await sendButton.click();
+    
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
     console.log(`Invitation sent successfully to ${profileUrl}`);
     return {
       success: true,

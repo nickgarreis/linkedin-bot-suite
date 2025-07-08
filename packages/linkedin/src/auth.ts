@@ -72,30 +72,10 @@ export async function initLinkedInContext(
   const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
   console.log('Using user agent:', randomUserAgent);
   
-  // Advanced Chrome configuration with session randomization for bot detection evasion
-  const randomViewport = {
-    width: 1920 + Math.floor(Math.random() * 200), // 1920-2120px width variation
-    height: 1080 + Math.floor(Math.random() * 200)  // 1080-1280px height variation
-  };
-  
-  // Randomize some browser arguments for session variation
-  const randomArgs = [
-    // Memory and performance randomization
-    `--max_old_space_size=${4096 + Math.floor(Math.random() * 2048)}`, // 4-6GB variation
-    `--memory-pressure-threshold=${100 + Math.floor(Math.random() * 50)}`, // Memory threshold variation
-    
-    // Timing randomization
-    `--renderer-process-limit=${2 + Math.floor(Math.random() * 3)}`, // 2-4 renderer processes
-    
-    // Feature randomization (some enabled, some disabled randomly)
-    ...(Math.random() > 0.5 ? ['--enable-features=WebRTCPipeWireCapturer'] : []),
-    ...(Math.random() > 0.5 ? ['--disable-features=AutoplayIgnoreWebAudio'] : [])
-  ];
-  
   const launchOptions: any = {
     headless: 'new',
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
-    protocolTimeout: 180000, // Reduced from 5min to 3min for faster failures
+    protocolTimeout: 60000, // Reduced from 180s to 60s for faster failures
     args: [
       // Essential container security
       '--no-sandbox',
@@ -104,16 +84,19 @@ export async function initLinkedInContext(
       '--disable-gpu',
       '--disable-gpu-sandbox',
       
+      // Container stability (user's recommendation)
+      '--single-process', // Add for container stability
+      '--no-zygote', // Prevent zombie processes
+      
       // User data (required)
       `--user-data-dir=${userDataDir}`,
       
-      // JavaScript and automation detection evasion
-      '--enable-javascript',
-      '--disable-blink-features=AutomationControlled', // Critical: Hide automation markers
-      '--disable-web-security', // Required for LinkedIn cross-origin resources
-      '--allow-running-insecure-content',
+      // Memory optimization
+      '--memory-pressure-off',
+      '--max_old_space_size=512', // Limit memory usage
+      '--js-flags=--max-old-space-size=512',
       
-      // Network configuration for containers (CRITICAL for LinkedIn)
+      // Network configuration for containers
       '--disable-features=NetworkService',
       '--enable-features=NetworkServiceInProcess', 
       '--ignore-certificate-errors-spki-list',
@@ -124,32 +107,32 @@ export async function initLinkedInContext(
       '--aggressive-cache-discard',
       '--disable-background-networking',
       
-      // Rendering and performance optimization
+      // Fixed window size (no randomization for stability)
+      '--window-size=1920,1080',
+      '--start-maximized',
+      
+      // Bot detection evasion
+      '--disable-blink-features=AutomationControlled',
+      '--disable-web-security',
+      '--disable-features=IsolateOrigins,site-per-process',
+      
+      // Performance optimization
       '--disable-features=VizDisplayCompositor,TranslateUI,BlinkGenPropertyTrees',
       '--disable-ipc-flooding-protection',
-      '--memory-pressure-off',
       '--no-default-browser-check',
       '--no-first-run',
       '--disable-default-apps',
       '--disable-background-timer-throttling',
       '--disable-renderer-backgrounding',
       '--disable-backgrounding-occluded-windows',
-      
-      // Enhanced bot detection evasion with randomization
-      `--window-size=${randomViewport.width},${randomViewport.height}`,
-      '--start-maximized',
       '--disable-extensions',
       '--disable-plugins',
-      '--disable-features=IsolateOrigins,site-per-process', // Stability for dynamic content
-      
-      // Add randomized arguments for session variation
-      ...randomArgs,
       
       ...(proxy ? [`--proxy-server=${proxy}`] : [])
     ]
   };
   
-  console.log(`🎲 Session randomization: ${randomViewport.width}x${randomViewport.height} viewport, ${randomArgs.length} random args`);
+  console.log('🎲 Using optimized Chrome configuration for container stability');
 
   let browser: Browser | null = null;
   let page: Page | null = null;
@@ -183,8 +166,8 @@ export async function initLinkedInContext(
     }
     
     // Set aggressive timeouts for fast execution
-    page.setDefaultNavigationTimeout(25000); // Reduced from 60s to 25s for speed
-    page.setDefaultTimeout(25000);           // Reduced from 60s to 25s for speed
+    page.setDefaultNavigationTimeout(20000); // Reduced from 25s to 20s for speed
+    page.setDefaultTimeout(20000);           // Reduced from 25s to 20s for speed
     
     // REMOVED: Viewport configuration completely to prevent Chrome session closure
     // Chrome will use default viewport settings
