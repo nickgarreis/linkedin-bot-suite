@@ -546,14 +546,150 @@ export async function verifyPageStability(
 /**
  * Generate human-like delay with natural variation
  */
+// Activity patterns based on time of day and session state
+export function getActivityPattern(): { isActiveHour: boolean; activityMultiplier: number } {
+  const hour = new Date().getHours();
+  const day = new Date().getDay();
+  
+  // Avoid weekends (reduced activity)
+  if (day === 0 || day === 6) {
+    return { isActiveHour: false, activityMultiplier: 0.3 };
+  }
+  
+  // Business hours (9 AM - 6 PM in user's timezone)
+  if (hour >= 9 && hour <= 18) {
+    return { isActiveHour: true, activityMultiplier: 1.0 };
+  }
+  
+  // Early morning/evening (reduced activity)
+  if ((hour >= 7 && hour < 9) || (hour > 18 && hour <= 20)) {
+    return { isActiveHour: true, activityMultiplier: 0.6 };
+  }
+  
+  // Night time (minimal activity)
+  return { isActiveHour: false, activityMultiplier: 0.1 };
+}
+
+// Session state tracking for fatigue simulation
+let sessionStartTime = Date.now();
+let sessionActionCount = 0;
+
+export function getSessionFatigue(): number {
+  const sessionDuration = Date.now() - sessionStartTime;
+  sessionActionCount++;
+  
+  // Increase delays as session progresses (fatigue effect)
+  const durationHours = sessionDuration / (1000 * 60 * 60);
+  const actionFatigue = Math.min(sessionActionCount / 20, 0.5); // Max 50% slowdown from actions
+  const timeFatigue = Math.min(durationHours / 2, 0.3); // Max 30% slowdown from time
+  
+  return 1 + actionFatigue + timeFatigue; // 1.0 to 1.8x multiplier
+}
+
+export function resetSessionState(): void {
+  sessionStartTime = Date.now();
+  sessionActionCount = 0;
+}
+
 export function humanDelay(baseMs: number, variationPercent: number = 50): number {
-  const variation = baseMs * (variationPercent / 100);
+  // Get activity pattern for current time
+  const activityPattern = getActivityPattern();
+  
+  // Get session fatigue multiplier
+  const fatigueMultiplier = getSessionFatigue();
+  
+  // Apply time-based and fatigue adjustments
+  let adjustedBase = baseMs * activityPattern.activityMultiplier * fatigueMultiplier;
+  
+  // Add more variation during off-hours (less predictable)
+  const variationAdjustment = activityPattern.isActiveHour ? variationPercent : variationPercent * 1.5;
+  
+  const variation = adjustedBase * (variationAdjustment / 100);
   const randomOffset = (Math.random() - 0.5) * 2 * variation;
-  return Math.max(100, Math.floor(baseMs + randomOffset));
+  
+  // Ensure minimum delay but allow longer delays during off-hours
+  const minDelay = activityPattern.isActiveHour ? 100 : 200;
+  const result = Math.max(minDelay, Math.floor(adjustedBase + randomOffset));
+  
+  return result;
 }
 
 /**
- * Human-like mouse movement simulation
+ * Simulate reading by scrolling and pausing like a human
+ */
+export async function simulateReading(page: Page): Promise<void> {
+  try {
+    // Get content length to adjust reading time
+    const contentInfo = await page.evaluate(() => {
+      const textContent = document.body?.textContent || '';
+      const hasImages = document.querySelectorAll('img').length;
+      const hasVideos = document.querySelectorAll('video').length;
+      return {
+        textLength: textContent.length,
+        hasImages: hasImages > 0,
+        hasVideos: hasVideos > 0,
+        scrollHeight: document.documentElement.scrollHeight,
+        viewHeight: window.innerHeight
+      };
+    });
+
+    if (contentInfo.scrollHeight <= contentInfo.viewHeight) {
+      // Page is short, just pause to "read"
+      const readingTime = Math.max(2000, Math.min(contentInfo.textLength / 10, 8000));
+      await new Promise(resolve => setTimeout(resolve, humanDelay(readingTime, 40)));
+      return;
+    }
+
+    // Simulate reading by scrolling and pausing
+    const scrollSteps = Math.floor(Math.random() * 3) + 2; // 2-4 scrolls
+    let currentScroll = 0;
+    
+    for (let i = 0; i < scrollSteps; i++) {
+      const scrollAmount = Math.floor(Math.random() * 400) + 200; // 200-600px
+      currentScroll += scrollAmount;
+      
+      await page.evaluate((scrollPos) => {
+        window.scrollTo({
+          top: scrollPos,
+          behavior: 'smooth'
+        });
+      }, currentScroll);
+      
+      // Content-aware reading pause
+      let readingTime = Math.floor(Math.random() * 3000) + 2000; // 2-5 seconds base
+      
+      // Adjust based on content type
+      if (contentInfo.hasImages || contentInfo.hasVideos) {
+        readingTime *= 1.5; // Longer for visual content
+      }
+      
+      // Apply activity pattern multiplier
+      const activityPattern = getActivityPattern();
+      readingTime *= activityPattern.activityMultiplier;
+      
+      await new Promise(resolve => setTimeout(resolve, readingTime));
+    }
+    
+    // Occasional scroll back up (re-reading behavior)
+    if (Math.random() < 0.3) {
+      const backScroll = Math.floor(currentScroll * 0.3);
+      await page.evaluate((scrollPos) => {
+        window.scrollTo({
+          top: scrollPos,
+          behavior: 'smooth'
+        });
+      }, backScroll);
+      
+      await new Promise(resolve => setTimeout(resolve, humanDelay(1500, 50)));
+    }
+    
+  } catch (error) {
+    console.warn('Reading simulation failed:', error);
+  }
+}
+
+/**
+ * Enhanced human-like behavior simulation with reading and content awareness
  */
 export async function simulateHumanBehavior(page: Page): Promise<void> {
   try {
@@ -562,60 +698,263 @@ export async function simulateHumanBehavior(page: Page): Promise<void> {
       window.dispatchEvent(new Event('focus'));
       document.dispatchEvent(new Event('focus'));
       
-      // Random mouse movements
-      const mouseMove = () => {
-        const x = Math.random() * window.innerWidth;
-        const y = Math.random() * window.innerHeight;
-        const event = new MouseEvent('mousemove', {
-          clientX: x,
-          clientY: y,
-          bubbles: true
-        });
-        document.dispatchEvent(event);
-      };
-      
-      // Multiple random mouse movements over time
-      setTimeout(mouseMove, Math.random() * 500);
-      setTimeout(mouseMove, Math.random() * 1000 + 500);
-      setTimeout(mouseMove, Math.random() * 1500 + 1000);
-      
-      // Simulate reading behavior with small scroll
-      const readingScroll = () => {
-        const scrollY = Math.random() * 300 + 50;
-        window.scrollTo({
-          top: scrollY,
-          behavior: 'smooth'
-        });
+      // Advanced mouse movement patterns
+      const mouseMove = (targetX?: number, targetY?: number) => {
+        const x = targetX || Math.random() * window.innerWidth;
+        const y = targetY || Math.random() * window.innerHeight;
         
-        // Scroll back after "reading"
-        setTimeout(() => {
-          window.scrollTo({
-            top: Math.random() * 100,
-            behavior: 'smooth'
-          });
-        }, Math.random() * 2000 + 1000);
+        // Create more realistic mouse movement with slight curves
+        const currentX = Math.random() * window.innerWidth;
+        const currentY = Math.random() * window.innerHeight;
+        
+        // Simulate curved movement with intermediate points
+        const steps = 3 + Math.floor(Math.random() * 3); // 3-5 steps
+        for (let i = 0; i <= steps; i++) {
+          setTimeout(() => {
+            const progress = i / steps;
+            const curveX = currentX + (x - currentX) * progress + (Math.random() - 0.5) * 20;
+            const curveY = currentY + (y - currentY) * progress + (Math.random() - 0.5) * 20;
+            
+            const event = new MouseEvent('mousemove', {
+              clientX: curveX,
+              clientY: curveY,
+              bubbles: true
+            });
+            document.dispatchEvent(event);
+          }, i * (50 + Math.random() * 30));
+        }
       };
       
-      setTimeout(readingScroll, Math.random() * 800 + 200);
+      // Multiple realistic mouse movements
+      setTimeout(() => mouseMove(), Math.random() * 300);
+      setTimeout(() => mouseMove(), Math.random() * 800 + 500);
+      setTimeout(() => mouseMove(), Math.random() * 1200 + 1000);
       
-      // Simulate window interactions
+      // Simulate occasional hover over clickable elements
+      setTimeout(() => {
+        const clickableElements = document.querySelectorAll('button, a, [role="button"]');
+        if (clickableElements.length > 0) {
+          const element = clickableElements[Math.floor(Math.random() * clickableElements.length)];
+          const rect = element.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            mouseMove(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          }
+        }
+      }, Math.random() * 1500 + 500);
+      
+      // Simulate occasional window interactions
       const windowInteraction = () => {
-        // Simulate window focus/blur
+        // Brief focus loss/regain (checking other tabs/windows)
         window.dispatchEvent(new Event('blur'));
         setTimeout(() => {
           window.dispatchEvent(new Event('focus'));
-        }, Math.random() * 100 + 50);
+        }, Math.random() * 200 + 100);
       };
       
-      setTimeout(windowInteraction, Math.random() * 1200 + 300);
+      // Occasional window interaction (10% chance)
+      if (Math.random() < 0.1) {
+        setTimeout(windowInteraction, Math.random() * 2000 + 1000);
+      }
     });
     
-    // Wait for behaviors to complete
-    await new Promise(resolve => setTimeout(resolve, humanDelay(2000, 30)));
+    // Include reading simulation as part of human behavior
+    await simulateReading(page);
     
   } catch (error) {
     console.warn('Human behavior simulation failed:', error);
   }
+}
+
+/**
+ * Human-like typing simulation with mistakes, corrections, and natural patterns
+ */
+export async function humanTyping(page: Page, text: string, options: {
+  element?: any;
+  selector?: string;
+  clearFirst?: boolean;
+  careful?: boolean;
+  burstMode?: boolean;
+} = {}): Promise<void> {
+  const { element, selector, clearFirst = false, careful = false, burstMode = false } = options;
+  
+  try {
+    let targetElement = element;
+    
+    // Get the target element if not provided
+    if (!targetElement && selector) {
+      targetElement = await page.$(selector);
+      if (!targetElement) {
+        throw new Error(`Element not found: ${selector}`);
+      }
+    }
+    
+    // Focus the element if provided
+    if (targetElement) {
+      await targetElement.click();
+      await new Promise(resolve => setTimeout(resolve, humanDelay(200, 30)));
+      
+      if (clearFirst) {
+        await targetElement.evaluate((el: HTMLInputElement | HTMLTextAreaElement) => {
+          el.select();
+        });
+        await new Promise(resolve => setTimeout(resolve, humanDelay(100, 20)));
+      }
+    }
+    
+    // Typing patterns based on mode
+    let baseTypingSpeed: number;
+    let mistakeChance: number;
+    let pauseChance: number;
+    
+    if (burstMode) {
+      // Fast, confident typing
+      baseTypingSpeed = 80;
+      mistakeChance = 0.02; // 2% chance
+      pauseChance = 0.05; // 5% chance of pauses
+    } else if (careful) {
+      // Slow, deliberate typing
+      baseTypingSpeed = 150;
+      mistakeChance = 0.01; // 1% chance
+      pauseChance = 0.15; // 15% chance of pauses
+    } else {
+      // Normal typing
+      baseTypingSpeed = 120;
+      mistakeChance = 0.03; // 3% chance
+      pauseChance = 0.08; // 8% chance of pauses
+    }
+    
+    // Apply activity pattern to typing speed
+    const activityPattern = getActivityPattern();
+    baseTypingSpeed *= (2 - activityPattern.activityMultiplier); // Slower when tired
+    
+    // Type character by character with natural variations
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      
+      // Thinking pause before certain characters (punctuation, start of words)
+      if (char === ' ' || char === '.' || char === ',' || char === '!' || char === '?') {
+        if (Math.random() < pauseChance) {
+          const thinkingTime = humanDelay(300, 80); // 120-480ms thinking
+          await new Promise(resolve => setTimeout(resolve, thinkingTime));
+        }
+      }
+      
+      // Typing mistake simulation
+      if (Math.random() < mistakeChance && i > 0) {
+        // Make a mistake - type wrong character
+        const wrongChars = 'abcdefghijklmnopqrstuvwxyz';
+        const wrongChar = wrongChars[Math.floor(Math.random() * wrongChars.length)];
+        
+        if (targetElement) {
+          await targetElement.type(wrongChar);
+        } else {
+          await page.keyboard.type(wrongChar);
+        }
+        
+        // Pause as user notices mistake
+        await new Promise(resolve => setTimeout(resolve, humanDelay(150, 50)));
+        
+        // Correct the mistake
+        await page.keyboard.press('Backspace');
+        await new Promise(resolve => setTimeout(resolve, humanDelay(80, 30)));
+      }
+      
+      // Type the actual character
+      if (targetElement) {
+        await targetElement.type(char);
+      } else {
+        await page.keyboard.type(char);
+      }
+      
+      // Variable typing speed with realistic patterns
+      let typingDelay = baseTypingSpeed;
+      
+      // Faster for common letter combinations
+      if (i > 0) {
+        const combo = text.slice(i-1, i+1).toLowerCase();
+        const fastCombos = ['th', 'he', 'in', 'er', 'an', 're', 'ed', 'nd', 'ou', 'ea'];
+        if (fastCombos.includes(combo)) {
+          typingDelay *= 0.7; // 30% faster
+        }
+      }
+      
+      // Slower for capital letters and numbers
+      if (char >= 'A' && char <= 'Z' || char >= '0' && char <= '9') {
+        typingDelay *= 1.3; // 30% slower
+      }
+      
+      // Burst typing occasionally (2-5 characters quickly)
+      if (burstMode && Math.random() < 0.1 && i < text.length - 3) {
+        const burstLength = Math.floor(Math.random() * 3) + 2; // 2-4 chars
+        for (let j = 1; j < burstLength && i + j < text.length; j++) {
+          const nextChar = text[i + j];
+          if (targetElement) {
+            await targetElement.type(nextChar);
+          } else {
+            await page.keyboard.type(nextChar);
+          }
+          await new Promise(resolve => setTimeout(resolve, typingDelay * 0.4)); // Much faster
+        }
+        i += burstLength - 1; // Skip the chars we just typed
+        continue;
+      }
+      
+      // Apply humanized delay
+      const finalDelay = humanDelay(typingDelay, 40);
+      await new Promise(resolve => setTimeout(resolve, finalDelay));
+    }
+    
+    // Final pause after typing (user reviewing what they typed)
+    const reviewTime = humanDelay(500, 60);
+    await new Promise(resolve => setTimeout(resolve, reviewTime));
+    
+  } catch (error) {
+    console.warn('Human typing simulation failed:', error);
+    // Fallback to simple typing
+    if (element) {
+      await element.type(text, { delay: humanDelay(100, 50) });
+    } else {
+      await page.keyboard.type(text, { delay: humanDelay(100, 50) });
+    }
+  }
+}
+
+/**
+ * LinkedIn-specific typing patterns for different contexts
+ */
+export async function linkedInTyping(page: Page, text: string, context: 'message' | 'note' | 'search' | 'comment', options: {
+  element?: any;
+  selector?: string;
+} = {}): Promise<void> {
+  let typingOptions: any = { ...options };
+  
+  switch (context) {
+    case 'message':
+      // Messages are usually more casual and faster
+      typingOptions.burstMode = Math.random() < 0.3; // 30% chance of burst mode
+      typingOptions.careful = false;
+      break;
+      
+    case 'note':
+      // Notes are more formal and careful
+      typingOptions.careful = true;
+      typingOptions.burstMode = false;
+      break;
+      
+    case 'search':
+      // Search is quick and efficient
+      typingOptions.burstMode = Math.random() < 0.6; // 60% chance of burst mode
+      typingOptions.careful = false;
+      break;
+      
+    case 'comment':
+      // Comments vary between careful and casual
+      typingOptions.careful = Math.random() < 0.4; // 40% chance of careful mode
+      typingOptions.burstMode = Math.random() < 0.2; // 20% chance of burst mode
+      break;
+  }
+  
+  await humanTyping(page, text, typingOptions);
 }
 
 /**

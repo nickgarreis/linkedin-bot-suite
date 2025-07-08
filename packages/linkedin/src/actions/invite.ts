@@ -1,12 +1,16 @@
 import { Page } from 'puppeteer';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
-import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady } from '../utils/browserHealth';
+import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady, linkedInTyping, getActivityPattern, resetSessionState } from '../utils/browserHealth';
 
 export async function sendInvitation(
   page: Page,
   profileUrl: string,
   note?: string
 ): Promise<{ success: boolean; message: string; profileUrl: string }> {
+  // Check activity patterns and respect business hours
+  const activityPattern = getActivityPattern();
+  console.log(`Activity pattern: ${activityPattern.isActiveHour ? 'Active' : 'Inactive'} hour (${activityPattern.activityMultiplier}x speed)`);
+  
   // Validate profile URL before navigation
   if (!profileUrl || !profileUrl.includes('linkedin.com/in/')) {
     throw new Error(`Invalid LinkedIn profile URL: ${profileUrl}`);
@@ -190,20 +194,23 @@ export async function sendInvitation(
           { timeout: 8000, retries: 2 }
         );
         
-        // Use safe element interaction for note field
+        // Use enhanced LinkedIn-specific typing for note field
         await safeElementInteraction(
           page,
           'textarea[name="message"]',
           async (noteField) => {
             await noteField.click({ clickCount: 3 }); // Select all existing text
-            const typingDelay = Math.floor(Math.random() * 80) + 40; // More realistic typing speed
-            await noteField.type(note, { delay: typingDelay });
-            const afterTypingDelay = humanDelay(1000, 70); // Variable pause after typing
-            await new Promise(resolve => setTimeout(resolve, afterTypingDelay));
-            console.log('Personal note added successfully');
+            await new Promise(resolve => setTimeout(resolve, humanDelay(200, 40))); // Brief pause after selection
+            
+            // Use LinkedIn-specific typing for note context
+            await linkedInTyping(page, note, 'note', { 
+              element: noteField
+            });
+            
+            console.log('Personal note added successfully with human-like typing patterns');
             return true;
           },
-          { timeout: 5000, retries: 2 }
+          { timeout: 8000, retries: 2 } // Increased timeout for longer typing simulation
         );
         
       } catch (error) {
