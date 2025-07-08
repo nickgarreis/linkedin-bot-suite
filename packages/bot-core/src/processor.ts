@@ -55,8 +55,8 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
     // Update job status to processing
     await webhookService.updateJobStatus(jobId, 'processing');
 
-    // Set job timeout (2 minutes max per job) - reduced from 5 minutes to prevent SIGTERM
-    const jobTimeoutMs = 2 * 60 * 1000; // 2 minutes
+    // Set job timeout (5 minutes max per job) - increased from 2 minutes for better button detection
+    const jobTimeoutMs = 5 * 60 * 1000; // 5 minutes
     jobTimeout = setTimeout(() => {
       const error = new Error(`Job ${jobId} timed out after ${jobTimeoutMs/1000} seconds`);
       console.error(`[bot-core] Job timeout: ${jobId}, timeout: ${jobTimeoutMs}ms`);

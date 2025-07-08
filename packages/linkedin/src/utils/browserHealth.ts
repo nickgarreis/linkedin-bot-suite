@@ -200,7 +200,7 @@ export async function withContextRecovery<T>(
 export async function safeEvaluate<T>(
   page: Page, 
   pageFunction: () => T, 
-  timeoutMs: number = 5000
+  timeoutMs: number = 10000
 ): Promise<T | {}> {
   return await withContextRecovery(page, async () => {
     // Check if page is closed first
@@ -2054,6 +2054,28 @@ export async function findLinkedInButton(
     console.warn('⚠️ DOM appears unstable, proceeding with caution');
   }
   
+  // Scroll profile card into view to ensure buttons are visible
+  console.log('📍 Scrolling profile card into view...');
+  try {
+    await safeEvaluate(page, () => {
+      // Find profile card or main content area
+      const profileCard = document.querySelector('.pv-top-card, .pvs-profile-actions, .profile-actions, .pv-s-profile-actions, .pv-top-card-v2-ctas');
+      if (profileCard) {
+        profileCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        console.log('✅ Profile card scrolled into view');
+      } else {
+        // Fallback: scroll to top of page
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        console.log('✅ Scrolled to top of page as fallback');
+      }
+    }, 3000);
+    
+    // Wait for scroll to complete
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  } catch (scrollError) {
+    console.warn('⚠️ Scroll into view failed:', scrollError);
+  }
+  
   const strategies = [
     {
       name: 'modern-2025-selectors',
@@ -2264,7 +2286,11 @@ function getModernSelectors(buttonType: string): string[] {
         '.pvs-profile-actions button[aria-label*="Connect"]',
         '[data-view-name="profile-actions"] button[aria-label*="Connect"]',
         '.pv-s-profile-actions button[aria-label*="Connect"]',
-        '.profile-actions button[aria-label*="Connect"]'
+        '.profile-actions button[aria-label*="Connect"]',
+        'div[role="button"][aria-label*="Connect"]',
+        'div[role="button"][aria-label*="Vernetzen"]',
+        'span[role="button"][aria-label*="Connect"]',
+        'span[role="button"][aria-label*="Vernetzen"]'
       ];
     case 'message':
       return [
@@ -2274,7 +2300,11 @@ function getModernSelectors(buttonType: string): string[] {
         '.pvs-profile-actions button[aria-label*="Message"]',
         '[data-view-name="profile-actions"] button[aria-label*="Message"]',
         '.pv-s-profile-actions button[aria-label*="Message"]',
-        '.profile-actions button[aria-label*="Message"]'
+        '.profile-actions button[aria-label*="Message"]',
+        'div[role="button"][aria-label*="Message"]',
+        'div[role="button"][aria-label*="Nachricht"]',
+        'span[role="button"][aria-label*="Message"]',
+        'span[role="button"][aria-label*="Nachricht"]'
       ];
     case 'send':
       return [
@@ -2283,7 +2313,11 @@ function getModernSelectors(buttonType: string): string[] {
         'button[data-control-name="send.invite"]',
         'button[data-control-name="send"]',
         '.send-invite__actions button[aria-label*="Send"]',
-        '.artdeco-modal__actionbar button[aria-label*="Send"]'
+        '.artdeco-modal__actionbar button[aria-label*="Send"]',
+        'div[role="button"][aria-label*="Send invite"]',
+        'div[role="button"][aria-label*="Einladung senden"]',
+        'span[role="button"][aria-label*="Send invite"]',
+        'span[role="button"][aria-label*="Einladung senden"]'
       ];
     case 'note':
       return [
@@ -2291,7 +2325,11 @@ function getModernSelectors(buttonType: string): string[] {
         'button[aria-label*="Notiz"]',
         'button[data-control-name="add-note"]',
         '.send-invite__add-note-button',
-        '.artdeco-modal button[aria-label*="Add a note"]'
+        '.artdeco-modal button[aria-label*="Add a note"]',
+        'div[role="button"][aria-label*="Add a note"]',
+        'div[role="button"][aria-label*="Notiz"]',
+        'span[role="button"][aria-label*="Add a note"]',
+        'span[role="button"][aria-label*="Notiz"]'
       ];
     default:
       return [];
@@ -2307,7 +2345,11 @@ function getLegacySelectors(buttonType: string): string[] {
         '.pv-s-profile-actions button[aria-label*="Connect"]',
         '.profile-actions button[aria-label*="Connect"]',
         '.pv-top-card__member-action-bar button[aria-label*="Connect"]',
-        '.pv-top-card-v2-ctas button[aria-label*="Connect"]'
+        '.pv-top-card-v2-ctas button[aria-label*="Connect"]',
+        'div[role="button"][aria-label="Connect"]',
+        'div[role="button"][aria-label="Vernetzen"]',
+        'span[role="button"][aria-label="Connect"]',
+        'span[role="button"][aria-label="Vernetzen"]'
       ];
     case 'message':
       return [
@@ -2315,21 +2357,33 @@ function getLegacySelectors(buttonType: string): string[] {
         'button[aria-label="Nachricht"]',
         '.pv-s-profile-actions button[aria-label*="Message"]',
         '.profile-actions button[aria-label*="Message"]',
-        '.pv-top-card__member-action-bar button[aria-label*="Message"]'
+        '.pv-top-card__member-action-bar button[aria-label*="Message"]',
+        'div[role="button"][aria-label="Message"]',
+        'div[role="button"][aria-label="Nachricht"]',
+        'span[role="button"][aria-label="Message"]',
+        'span[role="button"][aria-label="Nachricht"]'
       ];
     case 'send':
       return [
         'button[aria-label="Send invite"]',
         'button[aria-label="Einladung senden"]',
         '.send-invite__actions button[aria-label*="Send"]',
-        '.artdeco-modal__actionbar button'
+        '.artdeco-modal__actionbar button',
+        'div[role="button"][aria-label="Send invite"]',
+        'div[role="button"][aria-label="Einladung senden"]',
+        'span[role="button"][aria-label="Send invite"]',
+        'span[role="button"][aria-label="Einladung senden"]'
       ];
     case 'note':
       return [
         'button[aria-label="Add a note"]',
         'button[aria-label="Notiz"]',
         '.send-invite__add-note-button',
-        '.artdeco-modal button[aria-label*="note"]'
+        '.artdeco-modal button[aria-label*="note"]',
+        'div[role="button"][aria-label="Add a note"]',
+        'div[role="button"][aria-label="Notiz"]',
+        'span[role="button"][aria-label="Add a note"]',
+        'span[role="button"][aria-label="Notiz"]'
       ];
     default:
       return [];
@@ -2337,42 +2391,59 @@ function getLegacySelectors(buttonType: string): string[] {
 }
 
 function getTextBasedSelectors(buttonType: string): string[] {
+  // Return XPath selectors that work in Puppeteer for text-based button detection
   switch (buttonType) {
     case 'connect':
       return [
-        'button:has-text("Connect")',
-        'button:has-text("Vernetzen")',
-        'button span:contains("Connect")',
-        'button span:contains("Vernetzen")',
-        'button[type="button"]:contains("Connect")',
-        'button[type="button"]:contains("Vernetzen")'
+        '//button[contains(text(), "Connect")]',
+        '//button[contains(text(), "Vernetzen")]',
+        '//button[.//span[contains(text(), "Connect")]]',
+        '//button[.//span[contains(text(), "Vernetzen")]]',
+        '//button[@type="button" and contains(text(), "Connect")]',
+        '//button[@type="button" and contains(text(), "Vernetzen")]',
+        '//div[@role="button" and contains(text(), "Connect")]',
+        '//div[@role="button" and contains(text(), "Vernetzen")]',
+        '//span[@role="button" and contains(text(), "Connect")]',
+        '//span[@role="button" and contains(text(), "Vernetzen")]'
       ];
     case 'message':
       return [
-        'button:has-text("Message")',
-        'button:has-text("Nachricht")',
-        'button span:contains("Message")',
-        'button span:contains("Nachricht")',
-        'button[type="button"]:contains("Message")',
-        'button[type="button"]:contains("Nachricht")'
+        '//button[contains(text(), "Message")]',
+        '//button[contains(text(), "Nachricht")]',
+        '//button[.//span[contains(text(), "Message")]]',
+        '//button[.//span[contains(text(), "Nachricht")]]',
+        '//button[@type="button" and contains(text(), "Message")]',
+        '//button[@type="button" and contains(text(), "Nachricht")]',
+        '//div[@role="button" and contains(text(), "Message")]',
+        '//div[@role="button" and contains(text(), "Nachricht")]',
+        '//span[@role="button" and contains(text(), "Message")]',
+        '//span[@role="button" and contains(text(), "Nachricht")]'
       ];
     case 'send':
       return [
-        'button:has-text("Send")',
-        'button:has-text("Senden")',
-        'button span:contains("Send")',
-        'button span:contains("Senden")',
-        'button[type="button"]:contains("Send")',
-        'button[type="button"]:contains("Senden")'
+        '//button[contains(text(), "Send")]',
+        '//button[contains(text(), "Senden")]',
+        '//button[.//span[contains(text(), "Send")]]',
+        '//button[.//span[contains(text(), "Senden")]]',
+        '//button[@type="button" and contains(text(), "Send")]',
+        '//button[@type="button" and contains(text(), "Senden")]',
+        '//div[@role="button" and contains(text(), "Send")]',
+        '//div[@role="button" and contains(text(), "Senden")]',
+        '//span[@role="button" and contains(text(), "Send")]',
+        '//span[@role="button" and contains(text(), "Senden")]'
       ];
     case 'note':
       return [
-        'button:has-text("Add a note")',
-        'button:has-text("Notiz")',
-        'button span:contains("Add a note")',
-        'button span:contains("Notiz")',
-        'button[type="button"]:contains("note")',
-        'button[type="button"]:contains("Notiz")'
+        '//button[contains(text(), "Add a note")]',
+        '//button[contains(text(), "Notiz")]',
+        '//button[.//span[contains(text(), "Add a note")]]',
+        '//button[.//span[contains(text(), "Notiz")]]',
+        '//button[@type="button" and contains(text(), "note")]',
+        '//button[@type="button" and contains(text(), "Notiz")]',
+        '//div[@role="button" and contains(text(), "Add a note")]',
+        '//div[@role="button" and contains(text(), "Notiz")]',
+        '//span[@role="button" and contains(text(), "Add a note")]',
+        '//span[@role="button" and contains(text(), "Notiz")]'
       ];
     default:
       return [];
@@ -2388,7 +2459,13 @@ function getFuzzySelectors(buttonType: string): string[] {
         'button[title*="connect" i]',
         'button[title*="vernetzen" i]',
         'button[data-control-name*="connect" i]',
-        'button[class*="connect" i]'
+        'button[class*="connect" i]',
+        'div[role="button"][aria-label*="connect" i]',
+        'div[role="button"][aria-label*="vernetzen" i]',
+        'div[role="button"][title*="connect" i]',
+        'div[role="button"][title*="vernetzen" i]',
+        'span[role="button"][aria-label*="connect" i]',
+        'span[role="button"][aria-label*="vernetzen" i]'
       ];
     case 'message':
       return [
@@ -2397,7 +2474,13 @@ function getFuzzySelectors(buttonType: string): string[] {
         'button[title*="message" i]',
         'button[title*="nachricht" i]',
         'button[data-control-name*="message" i]',
-        'button[class*="message" i]'
+        'button[class*="message" i]',
+        'div[role="button"][aria-label*="message" i]',
+        'div[role="button"][aria-label*="nachricht" i]',
+        'div[role="button"][title*="message" i]',
+        'div[role="button"][title*="nachricht" i]',
+        'span[role="button"][aria-label*="message" i]',
+        'span[role="button"][aria-label*="nachricht" i]'
       ];
     case 'send':
       return [
@@ -2406,7 +2489,13 @@ function getFuzzySelectors(buttonType: string): string[] {
         'button[title*="send" i]',
         'button[title*="senden" i]',
         'button[data-control-name*="send" i]',
-        'button[class*="send" i]'
+        'button[class*="send" i]',
+        'div[role="button"][aria-label*="send" i]',
+        'div[role="button"][aria-label*="senden" i]',
+        'div[role="button"][title*="send" i]',
+        'div[role="button"][title*="senden" i]',
+        'span[role="button"][aria-label*="send" i]',
+        'span[role="button"][aria-label*="senden" i]'
       ];
     case 'note':
       return [
@@ -2415,7 +2504,13 @@ function getFuzzySelectors(buttonType: string): string[] {
         'button[title*="note" i]',
         'button[title*="notiz" i]',
         'button[data-control-name*="note" i]',
-        'button[class*="note" i]'
+        'button[class*="note" i]',
+        'div[role="button"][aria-label*="note" i]',
+        'div[role="button"][aria-label*="notiz" i]',
+        'div[role="button"][title*="note" i]',
+        'div[role="button"][title*="notiz" i]',
+        'span[role="button"][aria-label*="note" i]',
+        'span[role="button"][aria-label*="notiz" i]'
       ];
     default:
       return [];
