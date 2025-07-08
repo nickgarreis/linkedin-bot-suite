@@ -388,3 +388,200 @@ curl -X GET "https://api.render.com/v1/services/<service-id>/deploys" \
 - **Authentication**: Ensure `RENDER_API_KEY` has proper permissions
 - **Rate Limiting**: Be aware of API rate limits for frequent requests
 - **Error Handling**: Check HTTP status codes and response bodies for debugging
+
+## Critical Debugging & Troubleshooting (Latest Learnings)
+
+### LinkedIn Authentication & Chrome Error Issues
+
+#### **CRITICAL: User Agent Version Mismatch (Jan 2025)**
+**Problem**: Jobs consistently failing with `chrome-error://chromewebdata/` redirections after seemingly successful LinkedIn navigation.
+
+**Root Cause**: Outdated Chrome user agents (120.0.0.0) being rejected by LinkedIn's security systems when current Chrome is 137.0.0.0 - a 17-version gap triggers anti-bot detection.
+
+**Symptoms**:
+```
+Landed on https://www.linkedin.com/feed/
+Final URL after navigation: chrome-error://chromewebdata/
+Failed to launch browser: CRITICAL: Browser on Chrome error page
+```
+
+**Solution**: Update all user agents to current Chrome versions:
+- **Primary Fix**: Use current Chrome 137.0.0.0 user agents
+- **User's Exact Agent**: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36`
+- **Location**: Update both `userAgents` array and hardcoded `setUserAgent()` calls in `packages/linkedin/src/auth.ts`
+
+#### **Chrome Container Network Configuration**
+**Problem**: Chrome in Docker containers encounters network connectivity issues even with valid authentication.
+
+**Essential Chrome Args for Container Environments**:
+```typescript
+// Network and DNS configuration for containers (Critical for Chrome 137)
+'--disable-features=NetworkService',
+'--enable-features=NetworkServiceInProcess', 
+'--ignore-certificate-errors-spki-list',
+'--ignore-ssl-errors',
+'--ignore-certificate-errors',
+'--disable-site-isolation-trials',
+'--disable-features=BlockInsecurePrivateNetworkRequests',
+'--aggressive-cache-discard',
+'--disable-background-networking'
+```
+
+**Dockerfile Network Requirements**:
+```dockerfile
+# Network debugging and DNS tools
+dnsutils \
+iputils-ping \
+net-tools \
+curl \
+
+# Configure DNS for better network reliability  
+RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf \
+    && echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+```
+
+### Enhanced Error Detection & Monitoring
+
+#### **Real-Time URL Monitoring During Page Settle**
+**Problem**: LinkedIn allows initial navigation but redirects to error pages during 3-second "settle" period.
+
+**Solution**: Replace static wait with active monitoring:
+```typescript
+// Monitor for redirects with URL stability checking
+while (Date.now() - startTime < 3000) {
+  const currentPageUrl = page.url();
+  
+  // Detect Chrome error pages immediately
+  if (currentPageUrl.startsWith('chrome-error://') || 
+      currentPageUrl.includes('chromewebdata')) {
+    throw new Error(`Page redirected to Chrome error during monitoring: ${currentPageUrl}`);
+  }
+  
+  await new Promise(resolve => setTimeout(resolve, 500));
+}
+```
+
+#### **Network Error Categorization**
+**Enhanced Error Categories**: Added `net::ERR_ABORTED` and network errors to retryable categories:
+```typescript
+if (message.includes('net::err_aborted') ||
+    message.includes('err_aborted') ||
+    message.includes('net::err_blocked') ||
+    message.includes('net::err_failed')) {
+  return {
+    type: 'connection_lost',
+    recoverable: true,
+    retryable: true,
+    description: 'Network or connection issues (possible LinkedIn blocking or rate limiting)'
+  };
+}
+```
+
+### Worker Process & Signal Handling
+
+#### **Enhanced Graceful Shutdown for SIGTERM**
+**Problem**: Render.com sends SIGTERM during deployments, interrupting jobs mid-process.
+
+**Solution**: Robust graceful shutdown with job completion:
+```typescript
+async function gracefulShutdown(signal: string) {
+  // Set 90s hard timeout to prevent hanging
+  const shutdownTimeout = setTimeout(() => {
+    console.error('Graceful shutdown timeout reached (90s), forcing exit');
+    process.exit(1);
+  }, 90000);
+  
+  try {
+    await worker.pause(); // Stop new jobs
+    
+    // Wait max 75s for active jobs to complete
+    while (activeJobs > 0 && waitTime < 75000) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    await worker.close();
+    clearTimeout(shutdownTimeout);
+    process.exit(0);
+  } catch (error) {
+    clearTimeout(shutdownTimeout);
+    process.exit(1);
+  }
+}
+```
+
+### Navigation Strategy Improvements
+
+#### **Multi-Strategy Navigation with Retry Logic**
+**Enhanced Navigation**: Replace `networkidle0` (too strict) with flexible strategies:
+```typescript
+const navigationStrategies = [
+  { waitUntil: 'domcontentloaded' as const, timeout: 30000 },
+  { waitUntil: 'load' as const, timeout: 45000 },
+  { waitUntil: 'networkidle2' as const, timeout: 60000 }
+];
+```
+
+#### **Profile URL Validation & Human-like Behavior**
+**Pre-flight Validation**:
+```typescript
+if (!profileUrl || !profileUrl.includes('linkedin.com/in/')) {
+  throw new Error(`Invalid LinkedIn profile URL: ${profileUrl}`);
+}
+
+// Random delays (1-3 seconds) before actions
+const randomDelay = Math.floor(Math.random() * 2000) + 1000;
+await new Promise(resolve => setTimeout(resolve, randomDelay));
+```
+
+### Debugging Commands & Log Analysis
+
+#### **Essential Render Log Commands**
+```bash
+# Check worker logs for errors
+render logs -r srv-d1m1udq4d50c738d0630 --type=app --limit=50 -o text
+
+# Look for specific error patterns
+render logs -r srv-d1m1udq4d50c738d0630 --type=app --limit=100 -o text | grep -A 5 -B 5 "chrome-error"
+
+# Monitor real-time logs during job execution
+render logs -r srv-d1m1udq4d50c738d0630 --type=app --tail
+```
+
+#### **Key Error Patterns to Watch**
+1. **`chrome-error://chromewebdata/`** = User agent mismatch or network issues
+2. **`net::ERR_ABORTED`** = Network connectivity problems (now retryable)
+3. **`HTTP 429`** = Rate limiting (implement exponential backoff)
+4. **`SIGTERM received`** = Render deployment interruption (graceful shutdown)
+
+### Version Maintenance
+
+#### **Keep Chrome Versions Current**
+**Critical Maintenance Task**: Regularly update Chrome user agents to match current browser versions:
+
+1. **Check Current Chrome Version**: Visit `chrome://version/` or check user's browser
+2. **Update Locations**:
+   - `packages/linkedin/src/auth.ts` - `userAgents` array (lines 63-69)
+   - `packages/linkedin/src/auth.ts` - `setUserAgent()` call (line 195)
+3. **Test After Updates**: Verify authentication works with new versions
+4. **Frequency**: Update monthly or when Chrome updates significantly
+
+#### **Container Image Updates**
+**Docker Chrome Binary**: Ensure Chrome binary in container matches user agent versions:
+```dockerfile
+# Verify Chrome version matches user agents
+RUN /usr/bin/google-chrome-stable --version
+```
+
+### Performance Optimization
+
+#### **Memory Management Improvements**
+**Stricter Memory Limits**:
+```typescript
+// Reduced memory thresholds for earlier detection
+if (memoryIncrease.rss > 200) { // Reduced from 300MB
+  throw new Error(`Job terminated due to excessive memory usage: +${memoryIncrease.rss}MB RSS`);
+}
+```
+
+#### **Browser Health Monitoring**
+**Enhanced Health Checks**: Comprehensive validation with timeout-based cleanup and disconnect handlers for better error recovery.
