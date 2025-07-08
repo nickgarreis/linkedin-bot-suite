@@ -1,6 +1,6 @@
 import { Page } from 'puppeteer';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
-import { safeElementInteraction, verifyPageStability } from '../utils/browserHealth';
+import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior } from '../utils/browserHealth';
 
 export async function sendInvitation(
   page: Page,
@@ -14,9 +14,9 @@ export async function sendInvitation(
 
   console.log(`Navigating to profile: ${profileUrl}`);
   
-  // Add random delay to simulate human behavior
-  const randomDelay = Math.floor(Math.random() * 2000) + 1000; // 1-3 seconds
-  await new Promise(resolve => setTimeout(resolve, randomDelay));
+  // Add human-like delay before navigation
+  const navigationDelay = humanDelay(2000, 60); // 800ms-3200ms variation
+  await new Promise(resolve => setTimeout(resolve, navigationDelay));
   
   // Use more flexible navigation strategy with retry logic
   let navigationSuccess = false;
@@ -67,9 +67,12 @@ export async function sendInvitation(
   }
 
   try {
-    // Verify page stability before attempting DOM interactions
-    console.log('Waiting for page elements to load and stabilize...');
-    const isStable = await verifyPageStability(page, 3000);
+    // Simulate human behavior on the profile page
+    console.log('Simulating human behavior and checking page stability...');
+    await simulateHumanBehavior(page);
+    
+    const stabilityTime = humanDelay(2500, 40); // Variable stability check time
+    const isStable = await verifyPageStability(page, stabilityTime);
     if (!isStable) {
       console.warn('Page stability check failed, but proceeding with caution');
     }
@@ -122,8 +125,8 @@ export async function sendInvitation(
       { timeout: 10000, retries: 3 }
     );
     
-    // Wait for invitation modal with realistic timing
-    const modalWaitTime = Math.floor(Math.random() * 1000) + 1500; // 1.5-2.5 seconds
+    // Wait for invitation modal with human-like timing
+    const modalWaitTime = humanDelay(2000, 50); // Variable 1-3 second wait
     await new Promise(resolve => setTimeout(resolve, modalWaitTime));
 
     if (note) {
@@ -136,7 +139,8 @@ export async function sendInvitation(
           LINKEDIN_SELECTORS.NOTE_BUTTON,
           async (noteBtn) => {
             await noteBtn.click();
-            await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 500) + 500));
+            const clickDelay = humanDelay(700, 60); // Variable delay after click
+            await new Promise(resolve => setTimeout(resolve, clickDelay));
             return true;
           },
           { timeout: 8000, retries: 2 }
@@ -148,8 +152,10 @@ export async function sendInvitation(
           'textarea[name="message"]',
           async (noteField) => {
             await noteField.click({ clickCount: 3 }); // Select all existing text
-            await noteField.type(note, { delay: Math.floor(Math.random() * 50) + 50 }); // Human-like typing
-            await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 1000) + 500));
+            const typingDelay = Math.floor(Math.random() * 80) + 40; // More realistic typing speed
+            await noteField.type(note, { delay: typingDelay });
+            const afterTypingDelay = humanDelay(1000, 70); // Variable pause after typing
+            await new Promise(resolve => setTimeout(resolve, afterTypingDelay));
             console.log('Personal note added successfully');
             return true;
           },
@@ -174,8 +180,8 @@ export async function sendInvitation(
       { timeout: 10000, retries: 3 }
     );
     
-    // Wait for invitation to be processed with realistic timing
-    const confirmationWaitTime = Math.floor(Math.random() * 2000) + 2000; // 2-4 seconds
+    // Wait for invitation to be processed with human-like timing
+    const confirmationWaitTime = humanDelay(2500, 60); // Variable 1-4 second wait
     await new Promise(resolve => setTimeout(resolve, confirmationWaitTime));
     
     // Verify invitation was sent (check for success indicators)

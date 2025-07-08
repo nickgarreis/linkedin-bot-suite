@@ -9,9 +9,9 @@ async function sendInvitation(page, profileUrl, note) {
         throw new Error(`Invalid LinkedIn profile URL: ${profileUrl}`);
     }
     console.log(`Navigating to profile: ${profileUrl}`);
-    // Add random delay to simulate human behavior
-    const randomDelay = Math.floor(Math.random() * 2000) + 1000; // 1-3 seconds
-    await new Promise(resolve => setTimeout(resolve, randomDelay));
+    // Add human-like delay before navigation
+    const navigationDelay = (0, browserHealth_1.humanDelay)(2000, 60); // 800ms-3200ms variation
+    await new Promise(resolve => setTimeout(resolve, navigationDelay));
     // Use more flexible navigation strategy with retry logic
     let navigationSuccess = false;
     let lastError = null;
@@ -52,9 +52,11 @@ async function sendInvitation(page, profileUrl, note) {
         throw new Error(`Failed to navigate to profile after trying all strategies. Last error: ${lastError?.message || 'Unknown error'}`);
     }
     try {
-        // Verify page stability before attempting DOM interactions
-        console.log('Waiting for page elements to load and stabilize...');
-        const isStable = await (0, browserHealth_1.verifyPageStability)(page, 3000);
+        // Simulate human behavior on the profile page
+        console.log('Simulating human behavior and checking page stability...');
+        await (0, browserHealth_1.simulateHumanBehavior)(page);
+        const stabilityTime = (0, browserHealth_1.humanDelay)(2500, 40); // Variable stability check time
+        const isStable = await (0, browserHealth_1.verifyPageStability)(page, stabilityTime);
         if (!isStable) {
             console.warn('Page stability check failed, but proceeding with caution');
         }
@@ -95,8 +97,8 @@ async function sendInvitation(page, profileUrl, note) {
             await element.click();
             return true;
         }, { timeout: 10000, retries: 3 });
-        // Wait for invitation modal with realistic timing
-        const modalWaitTime = Math.floor(Math.random() * 1000) + 1500; // 1.5-2.5 seconds
+        // Wait for invitation modal with human-like timing
+        const modalWaitTime = (0, browserHealth_1.humanDelay)(2000, 50); // Variable 1-3 second wait
         await new Promise(resolve => setTimeout(resolve, modalWaitTime));
         if (note) {
             try {
@@ -104,14 +106,17 @@ async function sendInvitation(page, profileUrl, note) {
                 // Use safe element interaction for note button
                 await (0, browserHealth_1.safeElementInteraction)(page, shared_1.LINKEDIN_SELECTORS.NOTE_BUTTON, async (noteBtn) => {
                     await noteBtn.click();
-                    await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 500) + 500));
+                    const clickDelay = (0, browserHealth_1.humanDelay)(700, 60); // Variable delay after click
+                    await new Promise(resolve => setTimeout(resolve, clickDelay));
                     return true;
                 }, { timeout: 8000, retries: 2 });
                 // Use safe element interaction for note field
                 await (0, browserHealth_1.safeElementInteraction)(page, 'textarea[name="message"]', async (noteField) => {
                     await noteField.click({ clickCount: 3 }); // Select all existing text
-                    await noteField.type(note, { delay: Math.floor(Math.random() * 50) + 50 }); // Human-like typing
-                    await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 1000) + 500));
+                    const typingDelay = Math.floor(Math.random() * 80) + 40; // More realistic typing speed
+                    await noteField.type(note, { delay: typingDelay });
+                    const afterTypingDelay = (0, browserHealth_1.humanDelay)(1000, 70); // Variable pause after typing
+                    await new Promise(resolve => setTimeout(resolve, afterTypingDelay));
                     console.log('Personal note added successfully');
                     return true;
                 }, { timeout: 5000, retries: 2 });
@@ -127,8 +132,8 @@ async function sendInvitation(page, profileUrl, note) {
             await sendBtn.click();
             return true;
         }, { timeout: 10000, retries: 3 });
-        // Wait for invitation to be processed with realistic timing
-        const confirmationWaitTime = Math.floor(Math.random() * 2000) + 2000; // 2-4 seconds
+        // Wait for invitation to be processed with human-like timing
+        const confirmationWaitTime = (0, browserHealth_1.humanDelay)(2500, 60); // Variable 1-4 second wait
         await new Promise(resolve => setTimeout(resolve, confirmationWaitTime));
         // Verify invitation was sent (check for success indicators)
         try {

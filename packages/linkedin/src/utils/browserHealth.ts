@@ -523,6 +523,81 @@ export async function verifyPageStability(
 }
 
 /**
+ * Generate human-like delay with natural variation
+ */
+export function humanDelay(baseMs: number, variationPercent: number = 50): number {
+  const variation = baseMs * (variationPercent / 100);
+  const randomOffset = (Math.random() - 0.5) * 2 * variation;
+  return Math.max(100, Math.floor(baseMs + randomOffset));
+}
+
+/**
+ * Human-like mouse movement simulation
+ */
+export async function simulateHumanBehavior(page: Page): Promise<void> {
+  try {
+    await page.evaluate(() => {
+      // Simulate focus events
+      window.dispatchEvent(new Event('focus'));
+      document.dispatchEvent(new Event('focus'));
+      
+      // Random mouse movements
+      const mouseMove = () => {
+        const x = Math.random() * window.innerWidth;
+        const y = Math.random() * window.innerHeight;
+        const event = new MouseEvent('mousemove', {
+          clientX: x,
+          clientY: y,
+          bubbles: true
+        });
+        document.dispatchEvent(event);
+      };
+      
+      // Multiple random mouse movements over time
+      setTimeout(mouseMove, Math.random() * 500);
+      setTimeout(mouseMove, Math.random() * 1000 + 500);
+      setTimeout(mouseMove, Math.random() * 1500 + 1000);
+      
+      // Simulate reading behavior with small scroll
+      const readingScroll = () => {
+        const scrollY = Math.random() * 300 + 50;
+        window.scrollTo({
+          top: scrollY,
+          behavior: 'smooth'
+        });
+        
+        // Scroll back after "reading"
+        setTimeout(() => {
+          window.scrollTo({
+            top: Math.random() * 100,
+            behavior: 'smooth'
+          });
+        }, Math.random() * 2000 + 1000);
+      };
+      
+      setTimeout(readingScroll, Math.random() * 800 + 200);
+      
+      // Simulate window interactions
+      const windowInteraction = () => {
+        // Simulate window focus/blur
+        window.dispatchEvent(new Event('blur'));
+        setTimeout(() => {
+          window.dispatchEvent(new Event('focus'));
+        }, Math.random() * 100 + 50);
+      };
+      
+      setTimeout(windowInteraction, Math.random() * 1200 + 300);
+    });
+    
+    // Wait for behaviors to complete
+    await new Promise(resolve => setTimeout(resolve, humanDelay(2000, 30)));
+    
+  } catch (error) {
+    console.warn('Human behavior simulation failed:', error);
+  }
+}
+
+/**
  * Cleanup user data directory with modern fs.rm and retry logic
  */
 export async function cleanupUserDataDir(userDataDir: string): Promise<void> {

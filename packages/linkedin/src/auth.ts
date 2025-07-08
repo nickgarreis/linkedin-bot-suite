@@ -74,29 +74,12 @@ export async function initLinkedInContext(
     headless: 'new',
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
     args: [
-      // Core sandbox and security
+      // Essential sandbox and security (minimal set)
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       
-      // Network and DNS configuration for containers (Critical for Chrome 137)
-      '--disable-features=NetworkService',
-      '--enable-features=NetworkServiceInProcess',
-      '--ignore-certificate-errors-spki-list',
-      '--ignore-ssl-errors',
-      '--ignore-certificate-errors',
-      '--disable-site-isolation-trials',
-      '--disable-features=BlockInsecurePrivateNetworkRequests',
-      '--aggressive-cache-discard',
-      '--disable-background-networking',
-      
-      // Anti-detection measures
-      '--disable-blink-features=AutomationControlled',
-      '--exclude-switches=enable-automation',
-      '--disable-extensions-except=',
-      '--disable-plugins-except=',
-      '--disable-infobars',
-      '--disable-web-security',
+      // Network configuration (reduced automation footprint)
       '--disable-features=VizDisplayCompositor',
       '--disable-ipc-flooding-protection',
       
@@ -104,59 +87,46 @@ export async function initLinkedInContext(
       `--user-data-dir=${userDataDir}`,
       '--profile-directory=Default',
       
-      // Window and display
-      '--window-size=1920,1080',
-      '--start-maximized',
-      '--disable-gpu',
+      // Display settings (realistic for human users)
+      '--window-size=1366,768',  // More common resolution
+      '--disable-gpu',  // Required for containers
       '--disable-gpu-sandbox',
-      '--disable-software-rasterizer',
       
-      // Navigation and loading
+      // Minimal necessary flags (remove automation indicators)
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-default-apps',
+      '--disable-prompt-on-repost',
+      '--disable-hang-monitor',
       '--disable-background-timer-throttling',
       '--disable-backgrounding-occluded-windows',
       '--disable-renderer-backgrounding',
       '--disable-background-mode',
       
-      // Storage and permissions
-      '--allow-file-access-from-files',
-      '--disable-features=BlockInsecurePrivateNetworkRequests',
-      '--allow-running-insecure-content',
-      '--disable-features=IsolateOrigins,site-per-process',
-      
-      // Memory and performance
-      '--disable-crash-reporter',
-      '--disable-hang-monitor',
-      '--disable-prompt-on-repost',
-      '--disable-client-side-phishing-detection',
-      '--disable-sync',
-      '--disable-translate',
-      '--disable-logging',
-      '--disable-notifications',
-      '--disable-desktop-notifications',
+      // Memory and performance (container optimized)
+      '--memory-pressure-off',
       '--js-flags=--max-old-space-size=512',
       '--max_old_space_size=512',
       
-      // Container-specific stability
+      // Container-specific requirements
       '--single-process',
       '--no-zygote',
-      '--disable-extensions',
-      '--disable-plugins',
-      '--shm-size=1gb',
       '--disable-features=AudioServiceOutOfProcess',
       '--data-path=/tmp/chrome-data',
       '--homedir=/tmp',
       
-      // Additional anti-detection
-      '--disable-automation',
-      '--disable-save-password-bubble',
-      '--disable-single-click-autofill',
-      '--disable-autofill-keyboard-accessory-view',
-      '--disable-full-form-autofill-ios',
-      '--disable-password-generation',
-      '--disable-password-manager-reauthentication',
+      // Remove obvious automation flags entirely:
+      // REMOVED: --disable-blink-features=AutomationControlled
+      // REMOVED: --exclude-switches=enable-automation  
+      // REMOVED: --disable-automation
+      // REMOVED: --disable-extensions-except=
+      // REMOVED: --disable-plugins-except=
+      // REMOVED: --disable-infobars
+      // REMOVED: --disable-web-security
+      // REMOVED: --aggressive-cache-discard
+      // REMOVED: --disable-background-networking
+      // REMOVED: --disable-extensions
+      // REMOVED: --disable-plugins
       
       ...(proxy ? [`--proxy-server=${proxy}`] : [])
     ]
@@ -192,8 +162,8 @@ export async function initLinkedInContext(
     page.setDefaultNavigationTimeout(30000); // Reduced from 60s to 30s
     page.setDefaultTimeout(30000);           // Reduced from 45s to 30s
     
-    // Set viewport
-    await page.setViewport({ width: 1920, height: 1080 });
+    // Set realistic viewport (match window size)
+    await page.setViewport({ width: 1366, height: 768 });
     
     // Clear cache and storage before navigation to prevent redirect loops
     // Use data URL instead of about:blank for better security context
@@ -219,53 +189,187 @@ export async function initLinkedInContext(
       'Cache-Control': 'max-age=0'
     });
     
-    // Additional anti-detection measures
+    // Enhanced anti-detection measures with realistic browser fingerprinting
     await page.evaluateOnNewDocument(() => {
-      // Remove webdriver property
+      // Remove all webdriver traces
       delete (window as any).webdriver;
+      delete (window as any).__webdriver_evaluate;
+      delete (window as any).__selenium_evaluate;
+      delete (window as any).__webdriver_script_function;
+      delete (window as any).__webdriver_script_func;
+      delete (window as any).__webdriver_script_fn;
+      delete (window as any).__fxdriver_evaluate;
+      delete (window as any).__driver_unwrapped;
+      delete (window as any).__webdriver_unwrapped;
+      delete (window as any).__driver_evaluate;
+      delete (window as any).__selenium_unwrapped;
+      delete (window as any).__fxdriver_unwrapped;
       
-      // Override the plugins length
+      // Create realistic plugins array
+      const createPlugin = (name: string, filename: string, description: string) => ({
+        name,
+        filename,
+        description,
+        length: 1,
+        item: () => null,
+        namedItem: () => null,
+        refresh: () => {}
+      });
+      
+      const realisticPlugins = [
+        createPlugin('Chrome PDF Plugin', 'internal-pdf-viewer', 'Portable Document Format'),
+        createPlugin('Chrome PDF Viewer', 'mhjfbmdgcfjbbpaeojofohoefgiehjai', ''),
+        createPlugin('Native Client', 'internal-nacl-plugin', ''),
+        createPlugin('Chromium PDF Plugin', 'chromium-pdf-plugin', 'Portable Document Format'),
+        createPlugin('Microsoft Edge PDF Plugin', 'edge-pdf-plugin', 'Portable Document Format')
+      ];
+      
       Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5]
+        get: () => realisticPlugins
       });
       
-      // Override the languages property
+      // Realistic languages with proper Accept-Language format
       Object.defineProperty(navigator, 'languages', {
-        get: () => ['en-US', 'en']
+        get: () => ['en-US', 'en', 'de']
       });
       
-      // Override the webdriver property
+      // Override webdriver property consistently
       Object.defineProperty(navigator, 'webdriver', {
-        get: () => false
+        get: () => false,
+        configurable: true
       });
       
-      // Override the platform property
+      // Realistic platform detection
       Object.defineProperty(navigator, 'platform', {
         get: () => 'Win32'
       });
       
-      // Override the hardwareConcurrency property
+      // Realistic hardware specs
       Object.defineProperty(navigator, 'hardwareConcurrency', {
-        get: () => 4
+        get: () => 8  // More realistic for modern systems
       });
       
-      // Override the deviceMemory property
       Object.defineProperty(navigator, 'deviceMemory', {
         get: () => 8
       });
       
-      // Override the chrome property
+      // Enhanced vendor properties
+      Object.defineProperty(navigator, 'vendor', {
+        get: () => 'Google Inc.'
+      });
+      
+      Object.defineProperty(navigator, 'vendorSub', {
+        get: () => ''
+      });
+      
+      // Realistic app properties
+      Object.defineProperty(navigator, 'appName', {
+        get: () => 'Netscape'
+      });
+      
+      Object.defineProperty(navigator, 'appCodeName', {
+        get: () => 'Mozilla'
+      });
+      
+      Object.defineProperty(navigator, 'product', {
+        get: () => 'Gecko'
+      });
+      
+      Object.defineProperty(navigator, 'productSub', {
+        get: () => '20030107'
+      });
+      
+      // Chrome runtime with more realistic properties
       (window as any).chrome = {
-        runtime: {}
+        runtime: {
+          onConnect: undefined,
+          onMessage: undefined,
+          sendMessage: undefined,
+          connect: undefined
+        },
+        app: {
+          isInstalled: false,
+          InstallState: {
+            DISABLED: 'disabled',
+            INSTALLED: 'installed',
+            NOT_INSTALLED: 'not_installed'
+          },
+          RunningState: {
+            CANNOT_RUN: 'cannot_run',
+            READY_TO_RUN: 'ready_to_run',
+            RUNNING: 'running'
+          }
+        }
       };
       
-      // Override the permissions property
+      // Enhanced permissions handling
       const originalQuery = window.navigator.permissions.query;
-      window.navigator.permissions.query = (parameters: any) => (
-        parameters.name === 'notifications' ?
-          Promise.resolve({ state: Notification.permission } as PermissionStatus) :
-          originalQuery(parameters)
-      );
+      window.navigator.permissions.query = (parameters: any) => {
+        if (parameters.name === 'notifications') {
+          return Promise.resolve({ state: Notification.permission } as PermissionStatus);
+        }
+        if (parameters.name === 'geolocation') {
+          return Promise.resolve({ state: 'prompt' } as PermissionStatus);
+        }
+        return originalQuery(parameters);
+      };
+      
+      // Add realistic screen properties
+      Object.defineProperty(screen, 'colorDepth', {
+        get: () => 24
+      });
+      
+      Object.defineProperty(screen, 'pixelDepth', {
+        get: () => 24
+      });
+      
+      // Canvas fingerprinting protection
+      const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+      const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+      
+      HTMLCanvasElement.prototype.toDataURL = function(this: HTMLCanvasElement, ...args) {
+        // Add subtle noise to canvas data
+        const ctx = this.getContext('2d');
+        if (ctx) {
+          const originalData = originalToDataURL.apply(this, args);
+          // Return consistent but slightly modified data
+          return originalData.replace(/data:image\/png;base64,/, 'data:image/png;base64,iVBORw0KGgo=').slice(0, -20) + 'AAAAAABJRU5ErkJggg==';
+        }
+        return originalToDataURL.apply(this, args);
+      };
+      
+      // WebGL fingerprinting protection
+      const originalGetParameter = WebGLRenderingContext.prototype.getParameter;
+      WebGLRenderingContext.prototype.getParameter = function(this: WebGLRenderingContext, parameter: GLenum) {
+        if (parameter === this.VENDOR) {
+          return 'Intel Inc.';
+        }
+        if (parameter === this.RENDERER) {
+          return 'Intel(R) HD Graphics 630';
+        }
+        return originalGetParameter.apply(this, [parameter]);
+      };
+      
+      // Remove automation indicators from Error stack traces
+      const originalError = window.Error;
+      const CustomError = class extends originalError {
+        constructor(message?: string) {
+          super(message);
+          if (this.stack) {
+            this.stack = this.stack.replace(/\s+at.*puppeteer.*$/gm, '');
+            this.stack = this.stack.replace(/\s+at.*chrome-extension.*$/gm, '');
+            this.stack = this.stack.replace(/\s+at.*automation.*$/gm, '');
+          }
+        }
+      };
+      (window as any).Error = CustomError;
+      
+      // Add realistic date/time behavior
+      const originalDate = Date;
+      const timezoneOffset = -new originalDate().getTimezoneOffset();
+      Object.defineProperty(originalDate.prototype, 'getTimezoneOffset', {
+        value: () => timezoneOffset
+      });
     });
     
     // Parse and validate cookies
@@ -371,12 +475,47 @@ export async function initLinkedInContext(
         continue;
       }
       
-      // Monitor for redirects with URL stability checking
-      console.log('Monitoring page stability for 3 seconds...');
+      // Human-like page interaction and monitoring with variable timing
+      const monitoringDuration = Math.floor(Math.random() * 4000) + 2000; // 2-6 seconds instead of fixed 3
+      console.log(`Monitoring page stability for ${monitoringDuration}ms with human-like behavior...`);
       const startTime = Date.now();
       let monitoringError: Error | null = null;
       
-      while (Date.now() - startTime < 3000) {
+      // Add subtle mouse movement to simulate human presence
+      await page.evaluate(() => {
+        const addMouseMovement = () => {
+          const event = new MouseEvent('mousemove', {
+            clientX: Math.random() * window.innerWidth,
+            clientY: Math.random() * window.innerHeight,
+            bubbles: true
+          });
+          document.dispatchEvent(event);
+        };
+        
+        // Random mouse movements during monitoring
+        setTimeout(addMouseMovement, Math.random() * 1000);
+        setTimeout(addMouseMovement, Math.random() * 2000 + 1000);
+        setTimeout(addMouseMovement, Math.random() * 3000 + 2000);
+      });
+      
+      // Add realistic scroll behavior
+      await page.evaluate(() => {
+        const scrollAmount = Math.floor(Math.random() * 200) + 50;
+        window.scrollTo({
+          top: scrollAmount,
+          behavior: 'smooth'
+        });
+        
+        // Scroll back after a delay
+        setTimeout(() => {
+          window.scrollTo({
+            top: 0,
+            behavior: 'smooth'
+          });
+        }, Math.random() * 1500 + 500);
+      });
+      
+      while (Date.now() - startTime < monitoringDuration) {
         try {
           const currentPageUrl = page.url();
           
@@ -394,8 +533,9 @@ export async function initLinkedInContext(
             break;
           }
           
-          // Small delay between checks
-          await new Promise(resolve => setTimeout(resolve, 500));
+          // Variable delay between checks (more human-like)
+          const checkDelay = Math.floor(Math.random() * 800) + 300; // 300-1100ms
+          await new Promise(resolve => setTimeout(resolve, checkDelay));
           
         } catch (monitorError) {
           console.warn('Error during page monitoring:', monitorError);
