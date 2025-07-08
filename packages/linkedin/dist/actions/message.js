@@ -5,8 +5,8 @@ const shared_1 = require("@linkedin-bot-suite/shared");
 async function sendMessage(page, profileUrl, message) {
     await page.goto(profileUrl, { waitUntil: 'networkidle0' });
     try {
-        // Wait for page to load and find message button
-        const [messageButton] = await page.$x(shared_1.LINKEDIN_SELECTORS.MESSAGE_BUTTON);
+        // Wait for page to load and find message button using CSS selectors
+        const messageButton = await page.$(shared_1.LINKEDIN_SELECTORS.MESSAGE_BUTTON);
         if (!messageButton) {
             throw new Error('Message button not found - user may not be connected or messaging is disabled');
         }
@@ -26,8 +26,8 @@ async function sendMessage(page, profileUrl, message) {
         await new Promise(resolve => setTimeout(resolve, 500));
         await messageInput.type(message);
         await new Promise(resolve => setTimeout(resolve, 1000));
-        // Find and click send button
-        const sendBtn = await page.waitForXPath(shared_1.LINKEDIN_SELECTORS.SEND_MESSAGE_BUTTON, { timeout: 5000 });
+        // Find and click send button using CSS selectors
+        const sendBtn = await page.waitForSelector(shared_1.LINKEDIN_SELECTORS.SEND_MESSAGE_BUTTON, { timeout: 5000 });
         if (!sendBtn) {
             throw new Error('Send message button not found');
         }

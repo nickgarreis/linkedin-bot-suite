@@ -17,41 +17,49 @@ export async function initLinkedInContext(
     headless: 'new',
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
     args: [
+      // Core sandbox and security
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
+      
+      // Anti-detection measures
       '--disable-blink-features=AutomationControlled',
+      '--exclude-switches=enable-automation',
+      '--disable-extensions-except=',
+      '--disable-plugins-except=',
+      '--disable-infobars',
+      '--disable-web-security',
+      '--disable-features=VizDisplayCompositor',
+      '--disable-ipc-flooding-protection',
+      
+      // User data and profile
       `--user-data-dir=${userDataDir}`,
+      '--profile-directory=Default',
+      
+      // Window and display
       '--window-size=1920,1080',
       '--start-maximized',
       '--disable-gpu',
-      '--disable-web-security',
-      '--disable-features=IsolateOrigins,site-per-process',
+      '--disable-gpu-sandbox',
+      '--disable-software-rasterizer',
+      
+      // Navigation and loading
       '--no-first-run',
       '--no-default-browser-check',
-      '--disable-features=VizDisplayCompositor',
+      '--disable-default-apps',
       '--disable-background-timer-throttling',
       '--disable-backgrounding-occluded-windows',
       '--disable-renderer-backgrounding',
-      '--data-path=/tmp/chrome-data',
-      '--homedir=/tmp',
-      '--disable-crash-reporter',
-      '--disable-gpu-sandbox',
-      '--disable-software-rasterizer',
-      // Storage and security fixes for localStorage access
+      '--disable-background-mode',
+      
+      // Storage and permissions
       '--allow-file-access-from-files',
       '--disable-features=BlockInsecurePrivateNetworkRequests',
-      '--disable-background-mode',
       '--allow-running-insecure-content',
-      // Additional stability flags for containers
-      '--single-process',
-      '--no-zygote',
-      '--disable-extensions',
-      '--disable-plugins',
-      '--js-flags=--max-old-space-size=512',
-      // Memory and resource management
-      '--max_old_space_size=512',
-      '--disable-ipc-flooding-protection',
+      '--disable-features=IsolateOrigins,site-per-process',
+      
+      // Memory and performance
+      '--disable-crash-reporter',
       '--disable-hang-monitor',
       '--disable-prompt-on-repost',
       '--disable-client-side-phishing-detection',
@@ -60,11 +68,28 @@ export async function initLinkedInContext(
       '--disable-logging',
       '--disable-notifications',
       '--disable-desktop-notifications',
+      '--js-flags=--max-old-space-size=512',
+      '--max_old_space_size=512',
+      
       // Container-specific stability
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
+      '--single-process',
+      '--no-zygote',
+      '--disable-extensions',
+      '--disable-plugins',
       '--shm-size=1gb',
-      '--disable-features=VizDisplayCompositor,AudioServiceOutOfProcess',
+      '--disable-features=AudioServiceOutOfProcess',
+      '--data-path=/tmp/chrome-data',
+      '--homedir=/tmp',
+      
+      // Additional anti-detection
+      '--disable-automation',
+      '--disable-save-password-bubble',
+      '--disable-single-click-autofill',
+      '--disable-autofill-keyboard-accessory-view',
+      '--disable-full-form-autofill-ios',
+      '--disable-password-generation',
+      '--disable-password-manager-reauthentication',
+      
       ...(proxy ? [`--proxy-server=${proxy}`] : [])
     ]
   };
@@ -115,101 +140,222 @@ export async function initLinkedInContext(
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
       'Accept-Encoding': 'gzip, deflate, br',
       'Connection': 'keep-alive',
-      'Upgrade-Insecure-Requests': '1'
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+      'Cache-Control': 'max-age=0'
     });
     
-    // Parse and set cookies
-    const cookies = JSON.parse(process.env.LINKEDIN_COOKIES_JSON!);
+    // Additional anti-detection measures
+    await page.evaluateOnNewDocument(() => {
+      // Remove webdriver property
+      delete (window as any).webdriver;
+      
+      // Override the plugins length
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5]
+      });
+      
+      // Override the languages property
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en']
+      });
+      
+      // Override the webdriver property
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => false
+      });
+      
+      // Override the platform property
+      Object.defineProperty(navigator, 'platform', {
+        get: () => 'Win32'
+      });
+      
+      // Override the hardwareConcurrency property
+      Object.defineProperty(navigator, 'hardwareConcurrency', {
+        get: () => 4
+      });
+      
+      // Override the deviceMemory property
+      Object.defineProperty(navigator, 'deviceMemory', {
+        get: () => 8
+      });
+      
+      // Override the chrome property
+      (window as any).chrome = {
+        runtime: {}
+      };
+      
+      // Override the permissions property
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters: any) => (
+        parameters.name === 'notifications' ?
+          Promise.resolve({ state: Notification.permission } as PermissionStatus) :
+          originalQuery(parameters)
+      );
+    });
+    
+    // Parse and validate cookies
+    let cookies;
+    try {
+      cookies = JSON.parse(process.env.LINKEDIN_COOKIES_JSON!);
+    } catch (parseError) {
+      throw new Error(`Invalid LINKEDIN_COOKIES_JSON format: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+    }
+    
+    if (!Array.isArray(cookies)) {
+      throw new Error('LINKEDIN_COOKIES_JSON must be an array of cookie objects');
+    }
+    
     console.log(`Setting ${cookies.length} cookies...`);
     
-    // Validate essential cookies
+    // Validate essential cookies with expiration check
     const essentialCookies = ['li_at', 'JSESSIONID'];
+    const currentTime = Date.now() / 1000;
+    
     for (const cookieName of essentialCookies) {
-      if (!cookies.find((c: any) => c.name === cookieName)) {
+      const cookie = cookies.find((c: any) => c.name === cookieName);
+      if (!cookie) {
         throw new Error(`Missing essential cookie: ${cookieName}`);
+      }
+      
+      // Check if essential cookie is expired
+      if (cookie.expires && cookie.expires < currentTime) {
+        throw new Error(`Essential cookie ${cookieName} has expired (expires: ${new Date(cookie.expires * 1000).toISOString()})`);
       }
     }
     
     // Set cookies one by one to handle errors
+    let successCount = 0;
+    const failedCookies: string[] = [];
+    
     for (const cookie of cookies) {
       try {
-        // Remove expired cookies
-        if (cookie.expires && cookie.expires < Date.now() / 1000) {
-          delete cookie.expires;
+        // Remove expired cookies (keep unexpired ones)
+        if (cookie.expires && cookie.expires < currentTime) {
+          console.log(`Skipping expired cookie: ${cookie.name}`);
+          continue;
         }
+        
+        // Ensure required fields are present
+        if (!cookie.name || !cookie.value) {
+          console.warn(`Skipping invalid cookie (missing name or value): ${JSON.stringify(cookie)}`);
+          continue;
+        }
+        
+        // Set domain if missing (default to LinkedIn)
+        if (!cookie.domain) {
+          cookie.domain = '.linkedin.com';
+        }
+        
         await page.setCookie(cookie);
+        successCount++;
       } catch (err) {
         console.error(`Failed to set cookie ${cookie.name}:`, err);
+        failedCookies.push(cookie.name);
       }
     }
+    
+    console.log(`Successfully set ${successCount}/${cookies.length} cookies`);
+    if (failedCookies.length > 0) {
+      console.warn(`Failed to set cookies: ${failedCookies.join(', ')}`);
+    }
 
-  // Robust navigation with retry targets
+  // Robust navigation with retry targets and better error handling
   const targets = [
     'https://www.linkedin.com/feed/',
-    'https://www.linkedin.com/'
+    'https://www.linkedin.com/',
+    'https://www.linkedin.com/hp'
   ];
 
   let navOK = false;
   let currentUrl = '';
+  let lastError: Error | null = null;
   
   for (const target of targets) {
     try {
       console.log(`Navigating to ${target}`);
+      
+      // Pre-navigation health check
+      const preNavHealth = await checkPageHealth(page, { checkNavigation: false });
+      if (!preNavHealth.isHealthy) {
+        console.warn(`Pre-navigation health check failed: ${preNavHealth.error}`);
+        continue;
+      }
+      
       const resp = await page.goto(target, {
         waitUntil: 'domcontentloaded',
         timeout: 45000
       });
       
-      await new Promise(resolve => setTimeout(resolve, 2500)); // Let redirects finish
+      if (!resp) {
+        console.warn(`Navigation to ${target} returned no response`);
+        continue;
+      }
+      
+      if (resp.status() >= 400) {
+        console.warn(`Navigation to ${target} failed with status ${resp.status()}`);
+        continue;
+      }
+      
+      // Wait for redirects and content to settle
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Check if page is still healthy after navigation
+      const postNavHealth = await checkPageHealth(page, { checkNavigation: false });
+      if (!postNavHealth.isHealthy) {
+        console.warn(`Post-navigation health check failed: ${postNavHealth.error}`);
+        continue;
+      }
+      
       currentUrl = page.url();
       console.log(`Landed on ${currentUrl}`);
 
+      // More comprehensive URL validation
       if (!currentUrl.includes('/login') &&
           !currentUrl.includes('/authwall') &&
           !currentUrl.includes('/checkpoint') &&
-          currentUrl !== 'about:blank') {
+          !currentUrl.includes('/verify') &&
+          !currentUrl.includes('/challenge') &&
+          currentUrl !== 'about:blank' &&
+          currentUrl !== 'data:text/html') {
         navOK = true;
         
         // Try to click GDPR/cookie banner if present
         try {
-          // Use proper XPath method and add CSS fallback
-          let acceptButtons: any[] = [];
+          // Use CSS selectors for common cookie banner buttons
+          const cssSelectors = [
+            'button[data-test-id*="accept"]',
+            'button[aria-label*="Accept"]',
+            'button[id*="accept"]',
+            'button[class*="accept"]',
+            '[data-test="accept-all-cookies"]',
+            '.artdeco-global-alert button'
+          ];
           
-          try {
-            // Try XPath first
-            acceptButtons = await (page as any).$x("//button[contains(.,'Akzeptieren') or contains(.,'Accept all') or contains(.,'Alle akzeptieren')]");
-          } catch (xpathError) {
-            console.log('XPath selector failed, trying CSS selectors:', (xpathError as Error).message);
-            // Fallback to CSS selectors for common cookie banner buttons
-            const cssSelectors = [
-              'button[data-test-id*="accept"]',
-              'button[aria-label*="Accept"]',
-              'button[id*="accept"]',
-              'button[class*="accept"]',
-              '[data-test="accept-all-cookies"]',
-              '.artdeco-global-alert button'
-            ];
-            
-            for (const selector of cssSelectors) {
-              try {
-                const element = await page.$(selector);
-                if (element) {
-                  const text = await element.evaluate(el => el.textContent?.toLowerCase() || '');
-                  if (text.includes('accept') || text.includes('akzeptieren')) {
-                    acceptButtons = [element];
-                    break;
-                  }
+          let acceptButton = null;
+          
+          for (const selector of cssSelectors) {
+            try {
+              const element = await page.$(selector);
+              if (element) {
+                const text = await element.evaluate(el => el.textContent?.toLowerCase() || '');
+                if (text.includes('accept') || text.includes('akzeptieren')) {
+                  acceptButton = element;
+                  break;
                 }
-              } catch (cssError) {
-                // Continue to next selector
-                continue;
               }
+            } catch (cssError) {
+              // Continue to next selector
+              continue;
             }
           }
           
-          if (acceptButtons.length > 0) {
+          if (acceptButton) {
             console.log('Cookie banner detected – clicking accept button');
-            await acceptButtons[0].click();
+            await acceptButton.click();
             await new Promise(resolve => setTimeout(resolve, 1500));
           }
         } catch (bannerError) {
@@ -220,12 +366,14 @@ export async function initLinkedInContext(
         break;
       }
     } catch (navError) {
-      console.warn(`Navigation to ${target} failed:`, (navError as Error).message);
+      lastError = navError as Error;
+      console.warn(`Navigation to ${target} failed:`, lastError.message);
     }
   }
   
   if (!navOK) {
-    throw new Error('LinkedIn authentication failed – redirected to login/authwall on all targets');
+    const errorMessage = lastError ? ` Last error: ${lastError.message}` : '';
+    throw new Error(`LinkedIn authentication failed – redirected to login/authwall on all targets.${errorMessage}`);
   }
   
   // Add health check after successful navigation

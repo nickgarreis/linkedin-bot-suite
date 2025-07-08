@@ -5,6 +5,8 @@ services:
     plan: starter
     dockerfilePath: ./deployments/render/worker/Dockerfile
     dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
@@ -26,11 +28,24 @@ services:
       - key: BULLMQ_PREFIX
         value: bull
       - key: WORKER_CONCURRENCY
-        value: 2
+        value: 1
       - key: LOG_LEVEL
         value: info
+      # Resource management
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=1024 --optimize-for-size"
+      # Graceful shutdown configuration
+      - key: SIGTERM_TIMEOUT
+        value: 60000
+      # Chrome/Puppeteer configuration
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: true
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /usr/bin/google-chrome-stable
+      - key: CHROME_USER_DATA_DIR
+        value: /tmp/chrome-user-data
     
   - type: redis
     name: linkedin-bot-redis
     plan: starter
-    maxmemoryPolicy: allkeys-lru
+    maxmemoryPolicy: noeviction

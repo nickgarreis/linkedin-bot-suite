@@ -19,6 +19,19 @@ const redis     = { url: process.env.REDIS_URL! };
 export const jobQueue = new Queue(queueName, {
   prefix,
   connection: redis,
+  defaultJobOptions: {
+    // Job retry configuration with exponential backoff
+    attempts: 3,
+    backoff: {
+      type: 'exponential',
+      delay: 5000, // Start with 5 second delay
+    },
+    removeOnComplete: 100,
+    removeOnFail: 50,
+    // Job timeout configuration
+    delay: 0,
+    priority: 0,
+  },
 });
 
 new QueueEvents(queueName, {

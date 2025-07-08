@@ -44,17 +44,50 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
   let page: Page | null = null;
   let userDataDir: string | null = null;
   let heartbeat: NodeJS.Timeout | null = null;
-
-  log.info({ jobId, type: jobData.type }, 'Processing job');
+  let jobTimeout: NodeJS.Timeout | null = null;
+  
+  // Memory monitoring
+  const startMemory = process.memoryUsage();
+  const startTime = Date.now();
+  
+  log.info({ 
+    jobId, 
+    type: jobData.type, 
+    memoryUsage: {
+      rss: Math.round(startMemory.rss / 1024 / 1024),
+      heapUsed: Math.round(startMemory.heapUsed / 1024 / 1024),
+      heapTotal: Math.round(startMemory.heapTotal / 1024 / 1024)
+    }
+  }, 'Processing job started');
 
   try {
     // Update job status to processing
     await webhookService.updateJobStatus(jobId, 'processing');
 
-    // Add heartbeat interval to prevent job stalling
+    // Set job timeout (5 minutes max per job)
+    const jobTimeoutMs = 5 * 60 * 1000; // 5 minutes
+    jobTimeout = setTimeout(() => {
+      const error = new Error(`Job ${jobId} timed out after ${jobTimeoutMs/1000} seconds`);
+      log.error({ jobId, timeout: jobTimeoutMs }, 'Job timeout');
+      throw error;
+    }, jobTimeoutMs);
+
+    // Add heartbeat interval to prevent job stalling with memory monitoring
     heartbeat = setInterval(() => {
+      const currentMemory = process.memoryUsage();
+      const memoryIncrease = {
+        rss: Math.round((currentMemory.rss - startMemory.rss) / 1024 / 1024),
+        heapUsed: Math.round((currentMemory.heapUsed - startMemory.heapUsed) / 1024 / 1024),
+        heapTotal: Math.round((currentMemory.heapTotal - startMemory.heapTotal) / 1024 / 1024)
+      };
+      
       job.updateProgress(50); // Keep job alive
-      console.log(`Heartbeat for job ${jobId}`);
+      console.log(`Heartbeat for job ${jobId} - Memory delta: RSS +${memoryIncrease.rss}MB, Heap +${memoryIncrease.heapUsed}MB`);
+      
+      // Warn if memory usage is growing too much
+      if (memoryIncrease.rss > 200) { // More than 200MB increase
+        console.warn(`Job ${jobId} using excessive memory: +${memoryIncrease.rss}MB RSS`);
+      }
     }, 10000); // Every 10 seconds
 
     // Initialize browser context with timeout
@@ -99,25 +132,45 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
         throw new Error(`Unknown job type: ${(jobData as any).type}`);
     }
 
-    // Clear heartbeat before completion
+    // Clear timers before completion
     if (heartbeat) {
       clearInterval(heartbeat);
       heartbeat = null;
     }
+    if (jobTimeout) {
+      clearTimeout(jobTimeout);
+      jobTimeout = null;
+    }
     
-    log.info(
-      { jobId, type: jobData.type, profileUrl: jobData.profileUrl },
-      'Job completed successfully'
-    );
+    // Final memory and performance report
+    const endMemory = process.memoryUsage();
+    const duration = Date.now() - startTime;
+    const memoryDelta = {
+      rss: Math.round((endMemory.rss - startMemory.rss) / 1024 / 1024),
+      heapUsed: Math.round((endMemory.heapUsed - startMemory.heapUsed) / 1024 / 1024),
+      heapTotal: Math.round((endMemory.heapTotal - startMemory.heapTotal) / 1024 / 1024)
+    };
+    
+    log.info({
+      jobId, 
+      type: jobData.type, 
+      profileUrl: jobData.profileUrl,
+      duration: `${duration}ms`,
+      memoryDelta
+    }, 'Job completed successfully');
 
     // Process job completion
     await webhookService.processJobCompletion(jobId, true, result);
     
   } catch (err) {
-    // Clear heartbeat on error
+    // Clear timers on error
     if (heartbeat) {
       clearInterval(heartbeat);
       heartbeat = null;
+    }
+    if (jobTimeout) {
+      clearTimeout(jobTimeout);
+      jobTimeout = null;
     }
     
     const error = err instanceof Error ? err : new Error('Unknown error');

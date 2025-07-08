@@ -48,11 +48,11 @@ export declare const DEFAULT_JOB_OPTIONS: {
     readonly removeOnFail: 50;
 };
 export declare const LINKEDIN_SELECTORS: {
-    readonly CONNECT_BUTTON: "//button[normalize-space(text())=\"Vernetzen\" or normalize-space(text())=\"Connect\"]";
-    readonly NOTE_BUTTON: "//button[contains(text(),\"Notiz\") or contains(text(),\"Add a note\")]";
-    readonly SEND_BUTTON: "//button[contains(text(),\"Einladung senden\") or contains(text(),\"Send invite\")]";
-    readonly MESSAGE_BUTTON: "//button[contains(text(),\"Nachricht\") or contains(text(),\"Message\")]";
+    readonly CONNECT_BUTTON: "button[aria-label*=\"Connect\"], button[aria-label*=\"Vernetzen\"], button[data-control-name=\"connect\"]";
+    readonly NOTE_BUTTON: "button[aria-label*=\"Add a note\"], button[aria-label*=\"Notiz\"], button[data-control-name=\"add-note\"]";
+    readonly SEND_BUTTON: "button[aria-label*=\"Send invite\"], button[aria-label*=\"Einladung senden\"], button[data-control-name=\"send.invite\"]";
+    readonly MESSAGE_BUTTON: "button[aria-label*=\"Message\"], button[aria-label*=\"Nachricht\"], button[data-control-name=\"message\"]";
     readonly MESSAGE_TEXTAREA: "div[contenteditable=\"true\"][data-placeholder*=\"message\" i]";
-    readonly SEND_MESSAGE_BUTTON: "//button[contains(text(),\"Senden\") or contains(text(),\"Send\")]";
+    readonly SEND_MESSAGE_BUTTON: "button[aria-label*=\"Send\"], button[aria-label*=\"Senden\"], button[data-control-name=\"send\"]";
     readonly PROFILE_PHOTO: "img.global-nav__me-photo";
 };
