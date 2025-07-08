@@ -75,7 +75,7 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
       console.log(`Heartbeat for job ${jobId} - Memory delta: RSS +${memoryIncrease.rss}MB, Heap +${memoryIncrease.heapUsed}MB`);
       
       // Force GC if memory is high
-      if (memoryIncrease.rss > 100 && global.gc) {
+      if (memoryIncrease.rss > 400 && global.gc) {
         console.log('Force garbage collection');
         global.gc();
       }
@@ -93,7 +93,7 @@ export async function processJob(job: Job<LinkedInJob>): Promise<void> {
       }
       
       // Stricter memory leak detection and prevention
-      if (memoryIncrease.rss > 150) { // Reduced from 200MB
+      if (memoryIncrease.rss > 600) { // Increased from 150MB for 2GB container
         console.error(`⚠️ CRITICAL: Job ${jobId} using excessive memory: +${memoryIncrease.rss}MB RSS - force terminating job`);
         throw new Error(`Job terminated due to excessive memory usage: +${memoryIncrease.rss}MB RSS`);
       }
