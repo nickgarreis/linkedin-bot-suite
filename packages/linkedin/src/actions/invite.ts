@@ -1,5 +1,6 @@
 import { Page } from 'puppeteer';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
+import { safeElementInteraction, verifyPageStability } from '../utils/browserHealth';
 
 export async function sendInvitation(
   page: Page,
@@ -66,56 +67,60 @@ export async function sendInvitation(
   }
 
   try {
-    // Wait for page to stabilize and check for connect button
-    console.log('Waiting for page elements to load...');
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Enhanced connect button detection with multiple attempts
-    let connect = null;
-    let attempts = 0;
-    const maxAttempts = 3;
-    
-    while (!connect && attempts < maxAttempts) {
-      attempts++;
-      console.log(`Attempting to find connect button (attempt ${attempts}/${maxAttempts})`);
-      
-      connect = await page.$(LINKEDIN_SELECTORS.CONNECT_BUTTON);
-      
-      if (!connect) {
-        // Check for alternative connection states
-        const alreadyConnected = await page.$('button[aria-label*="Message"], button[aria-label*="Nachricht"]');
-        const pendingInvite = await page.$('button[aria-label*="Pending"], button[aria-label*="Ausstehend"]');
-        
-        if (alreadyConnected) {
-          throw new Error('User is already connected - cannot send invitation');
-        }
-        
-        if (pendingInvite) {
-          throw new Error('Invitation already pending - cannot send duplicate invitation');
-        }
-        
-        if (attempts < maxAttempts) {
-          console.log('Connect button not found, waiting and retrying...');
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-      }
+    // Verify page stability before attempting DOM interactions
+    console.log('Waiting for page elements to load and stabilize...');
+    const isStable = await verifyPageStability(page, 3000);
+    if (!isStable) {
+      console.warn('Page stability check failed, but proceeding with caution');
     }
     
-    if (!connect) {
-      // Detailed error logging for debugging
+    // Check for alternative connection states first using safe evaluation
+    const connectionState = await page.evaluate(() => {
+      const messageBtn = document.querySelector('button[aria-label*="Message"], button[aria-label*="Nachricht"]');
+      const pendingBtn = document.querySelector('button[aria-label*="Pending"], button[aria-label*="Ausstehend"]');
+      const connectBtn = document.querySelector('button[aria-label*="Connect"], button[aria-label*="Vernetzen"]');
+      
+      return {
+        hasMessageButton: !!messageBtn,
+        hasPendingButton: !!pendingBtn,
+        hasConnectButton: !!connectBtn,
+        messageText: messageBtn?.textContent || '',
+        pendingText: pendingBtn?.textContent || '',
+        connectText: connectBtn?.textContent || ''
+      };
+    });
+    
+    if (connectionState.hasMessageButton) {
+      throw new Error('User is already connected - cannot send invitation');
+    }
+    
+    if (connectionState.hasPendingButton) {
+      throw new Error('Invitation already pending - cannot send duplicate invitation');
+    }
+    
+    if (!connectionState.hasConnectButton) {
       const currentUrl = page.url();
       const pageTitle = await page.title();
-      console.error('Connect button detection failed:', {
+      console.error('Connect button not found on page:', {
         currentUrl,
         pageTitle,
         profileUrl,
-        attempts: maxAttempts
+        connectionState
       });
-      throw new Error(`Connect button not found after ${maxAttempts} attempts - user may already be connected, profile is private, or page failed to load properly`);
+      throw new Error('Connect button not found - user may already be connected, profile is private, or page failed to load properly');
     }
     
-    console.log('Connect button found, clicking...');
-    await connect.click();
+    // Use safe element interaction for connect button
+    console.log('Connect button found, clicking with safe interaction...');
+    await safeElementInteraction(
+      page,
+      LINKEDIN_SELECTORS.CONNECT_BUTTON,
+      async (element) => {
+        await element.click();
+        return true;
+      },
+      { timeout: 10000, retries: 3 }
+    );
     
     // Wait for invitation modal with realistic timing
     const modalWaitTime = Math.floor(Math.random() * 1000) + 1500; // 1.5-2.5 seconds
@@ -124,34 +129,50 @@ export async function sendInvitation(
     if (note) {
       try {
         console.log('Adding personal note to invitation...');
-        const noteBtn = await page.waitForSelector(LINKEDIN_SELECTORS.NOTE_BUTTON, { timeout: 8000 });
-        if (noteBtn) {
-          await noteBtn.click();
-          await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 500) + 500));
-          
-          // Clear existing text and type new note with human-like timing
-          const noteField = await page.waitForSelector('textarea[name="message"]', { timeout: 5000 });
-          if (noteField) {
+        
+        // Use safe element interaction for note button
+        await safeElementInteraction(
+          page,
+          LINKEDIN_SELECTORS.NOTE_BUTTON,
+          async (noteBtn) => {
+            await noteBtn.click();
+            await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 500) + 500));
+            return true;
+          },
+          { timeout: 8000, retries: 2 }
+        );
+        
+        // Use safe element interaction for note field
+        await safeElementInteraction(
+          page,
+          'textarea[name="message"]',
+          async (noteField) => {
             await noteField.click({ clickCount: 3 }); // Select all existing text
             await noteField.type(note, { delay: Math.floor(Math.random() * 50) + 50 }); // Human-like typing
             await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 1000) + 500));
             console.log('Personal note added successfully');
-          }
-        }
+            return true;
+          },
+          { timeout: 5000, retries: 2 }
+        );
+        
       } catch (error) {
         console.warn('Note addition failed, proceeding without note:', (error as Error).message);
       }
     }
 
-    // Find and click send button with enhanced detection
+    // Find and click send button with safe interaction
     console.log('Looking for send button...');
-    const sendBtn = await page.waitForSelector(LINKEDIN_SELECTORS.SEND_BUTTON, { timeout: 10000 });
-    if (!sendBtn) {
-      throw new Error('Send invitation button not found - modal may not have loaded properly');
-    }
-    
-    console.log('Sending invitation...');
-    await sendBtn.click();
+    await safeElementInteraction(
+      page,
+      LINKEDIN_SELECTORS.SEND_BUTTON,
+      async (sendBtn) => {
+        console.log('Sending invitation...');
+        await sendBtn.click();
+        return true;
+      },
+      { timeout: 10000, retries: 3 }
+    );
     
     // Wait for invitation to be processed with realistic timing
     const confirmationWaitTime = Math.floor(Math.random() * 2000) + 2000; // 2-4 seconds
@@ -159,11 +180,17 @@ export async function sendInvitation(
     
     // Verify invitation was sent (check for success indicators)
     try {
-      const successIndicator = await page.waitForSelector('[data-test-modal-id="send-invite-modal"]', { 
-        timeout: 3000,
-        hidden: true // Wait for modal to disappear
+      // Use page evaluation to check if modal is gone more reliably
+      const modalClosed = await page.evaluate(() => {
+        const modal = document.querySelector('[data-test-modal-id="send-invite-modal"]') as HTMLElement;
+        return !modal || modal.style.display === 'none' || !modal.isConnected;
       });
-      console.log('Invitation modal closed - invitation likely sent');
+      
+      if (modalClosed) {
+        console.log('Invitation modal closed - invitation likely sent');
+      } else {
+        console.warn('Modal still present, but proceeding as success');
+      }
     } catch (error) {
       console.warn('Could not verify invitation modal closure, but proceeding as success');
     }

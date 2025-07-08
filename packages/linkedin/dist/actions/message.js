@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendMessage = sendMessage;
 const shared_1 = require("@linkedin-bot-suite/shared");
+const browserHealth_1 = require("../utils/browserHealth");
 async function sendMessage(page, profileUrl, message) {
     // Validate inputs
     if (!profileUrl || !profileUrl.includes('linkedin.com/in/')) {
@@ -32,34 +33,58 @@ async function sendMessage(page, profileUrl, message) {
         throw new Error(`Failed to navigate to profile: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
     try {
-        // Wait for page to load and find message button using CSS selectors
-        const messageButton = await page.$(shared_1.LINKEDIN_SELECTORS.MESSAGE_BUTTON);
-        if (!messageButton) {
+        // Verify page stability before attempting DOM interactions
+        console.log('Waiting for page elements to stabilize...');
+        const isStable = await (0, browserHealth_1.verifyPageStability)(page, 2000);
+        if (!isStable) {
+            console.warn('Page stability check failed, but proceeding with caution');
+        }
+        // Check for message button availability using safe evaluation
+        const buttonState = await page.evaluate(() => {
+            const messageBtn = document.querySelector('button[aria-label*="Message"], button[aria-label*="Nachricht"]');
+            const connectBtn = document.querySelector('button[aria-label*="Connect"], button[aria-label*="Vernetzen"]');
+            return {
+                hasMessageButton: !!messageBtn,
+                hasConnectButton: !!connectBtn,
+                messageText: messageBtn?.textContent || '',
+                isMessageEnabled: messageBtn ? !messageBtn.disabled : false
+            };
+        });
+        if (!buttonState.hasMessageButton) {
+            if (buttonState.hasConnectButton) {
+                throw new Error('User is not connected - connect first before messaging');
+            }
             throw new Error('Message button not found - user may not be connected or messaging is disabled');
         }
-        await messageButton.click();
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for message window to open
-        // Find the message input area
-        const messageInput = await page.waitForSelector(shared_1.LINKEDIN_SELECTORS.MESSAGE_TEXTAREA, { timeout: 10000 });
-        if (!messageInput) {
-            throw new Error('Message input area not found');
+        if (!buttonState.isMessageEnabled) {
+            throw new Error('Message button is disabled - messaging may not be available');
         }
-        // Clear any existing text and type the message
-        await messageInput.click();
-        await page.keyboard.down('Control');
-        await page.keyboard.press('a');
-        await page.keyboard.up('Control');
-        await page.keyboard.press('Delete');
-        await new Promise(resolve => setTimeout(resolve, 500));
-        await messageInput.type(message);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        // Find and click send button using CSS selectors
-        const sendBtn = await page.waitForSelector(shared_1.LINKEDIN_SELECTORS.SEND_MESSAGE_BUTTON, { timeout: 5000 });
-        if (!sendBtn) {
-            throw new Error('Send message button not found');
-        }
-        await sendBtn.click();
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for message to be sent
+        // Use safe element interaction for message button
+        console.log('Message button found, clicking with safe interaction...');
+        await (0, browserHealth_1.safeElementInteraction)(page, shared_1.LINKEDIN_SELECTORS.MESSAGE_BUTTON, async (messageButton) => {
+            await messageButton.click();
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for message window to open
+            return true;
+        }, { timeout: 10000, retries: 3 });
+        // Use safe element interaction for message input
+        await (0, browserHealth_1.safeElementInteraction)(page, shared_1.LINKEDIN_SELECTORS.MESSAGE_TEXTAREA, async (messageInput) => {
+            // Clear any existing text and type the message
+            await messageInput.click();
+            await page.keyboard.down('Control');
+            await page.keyboard.press('a');
+            await page.keyboard.up('Control');
+            await page.keyboard.press('Delete');
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await messageInput.type(message);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return true;
+        }, { timeout: 10000, retries: 3 });
+        // Use safe element interaction for send button
+        await (0, browserHealth_1.safeElementInteraction)(page, shared_1.LINKEDIN_SELECTORS.SEND_MESSAGE_BUTTON, async (sendBtn) => {
+            await sendBtn.click();
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for message to be sent
+            return true;
+        }, { timeout: 5000, retries: 3 });
         return {
             success: true,
             message: 'Message sent successfully',

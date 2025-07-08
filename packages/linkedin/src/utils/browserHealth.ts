@@ -324,7 +324,7 @@ export async function safeNavigate(
  * Error categorization for better recovery strategies
  */
 export interface ErrorCategory {
-  type: 'browser_crash' | 'frame_detached' | 'connection_lost' | 'navigation_failed' | 'authentication_failed' | 'unknown';
+  type: 'browser_crash' | 'frame_detached' | 'connection_lost' | 'navigation_failed' | 'authentication_failed' | 'dom_protocol_error' | 'unknown';
   recoverable: boolean;
   retryable: boolean;
   description: string;
@@ -343,6 +343,20 @@ export function categorizeError(error: Error): ErrorCategory {
       recoverable: true,
       retryable: true,
       description: 'Browser process crashed or connection lost'
+    };
+  }
+  
+  // DOM Protocol errors (new category for LinkedIn interaction issues)
+  if (message.includes('protocol error') && 
+      (message.includes('dom.describenode') || 
+       message.includes('dom.resolvenode') ||
+       message.includes('cannot find context with specified id') ||
+       message.includes('node with given id does not belong to the document'))) {
+    return {
+      type: 'dom_protocol_error',
+      recoverable: true,
+      retryable: true,
+      description: 'DOM element became detached during interaction - likely due to dynamic page updates'
     };
   }
   
@@ -410,6 +424,102 @@ export function categorizeError(error: Error): ErrorCategory {
     retryable: false,
     description: 'Unknown error type'
   };
+}
+
+/**
+ * Safe element interaction with retry logic for DOM protocol errors
+ */
+export async function safeElementInteraction<T>(
+  page: Page,
+  selector: string,
+  action: (element: any) => Promise<T>,
+  options: { timeout?: number; retries?: number } = {}
+): Promise<T> {
+  const { timeout = 10000, retries = 3 } = options;
+  
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      // Wait for element to be present
+      const element = await page.waitForSelector(selector, { timeout });
+      if (!element) {
+        throw new Error(`Element not found: ${selector}`);
+      }
+      
+      // Verify element is still attached before interaction
+      const isAttached = await element.evaluate(el => !!el.isConnected);
+      if (!isAttached) {
+        throw new Error(`Element is not attached to document: ${selector}`);
+      }
+      
+      // Perform the action
+      const result = await action(element);
+      
+      console.log(`Safe element interaction succeeded for ${selector} (attempt ${attempt})`);
+      return result;
+      
+    } catch (error: any) {
+      const isLastAttempt = attempt === retries;
+      const isDOMProtocolError = error.message.toLowerCase().includes('protocol error') && 
+                                (error.message.includes('DOM.') || 
+                                 error.message.includes('cannot find context') ||
+                                 error.message.includes('does not belong to the document'));
+      
+      if (isDOMProtocolError && !isLastAttempt) {
+        console.warn(`DOM protocol error on attempt ${attempt}/${retries} for ${selector}, retrying...`);
+        // Wait before retry to let page stabilize
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        continue;
+      }
+      
+      if (isLastAttempt) {
+        console.error(`Safe element interaction failed after ${retries} attempts for ${selector}:`, error.message);
+        throw error;
+      }
+      
+      // For other errors, wait a bit and retry
+      console.warn(`Element interaction failed on attempt ${attempt}/${retries}:`, error.message);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+  
+  throw new Error(`Safe element interaction failed after all retries for ${selector}`);
+}
+
+/**
+ * Verify page and element stability before interactions
+ */
+export async function verifyPageStability(
+  page: Page,
+  stabilityTimeMs: number = 2000
+): Promise<boolean> {
+  try {
+    if (page.isClosed() || !page.browser().isConnected()) {
+      return false;
+    }
+    
+    // Check that URL is stable
+    const initialUrl = page.url();
+    await new Promise(resolve => setTimeout(resolve, stabilityTimeMs));
+    const finalUrl = page.url();
+    
+    if (initialUrl !== finalUrl) {
+      console.warn('Page URL changed during stability check:', { initialUrl, finalUrl });
+      return false;
+    }
+    
+    // Verify basic page structure is intact
+    const pageStructure = await safeEvaluate(page, () => ({
+      hasBody: !!document.body,
+      readyState: document.readyState,
+      title: document.title
+    }));
+    
+    return (pageStructure as any).hasBody && (pageStructure as any).readyState === 'complete';
+    
+  } catch (error) {
+    console.warn('Page stability check failed:', error);
+    return false;
+  }
 }
 
 /**

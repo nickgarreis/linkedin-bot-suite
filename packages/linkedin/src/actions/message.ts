@@ -1,5 +1,6 @@
 import { Page } from 'puppeteer';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
+import { safeElementInteraction, verifyPageStability } from '../utils/browserHealth';
 
 export async function sendMessage(
   page: Page,
@@ -41,44 +42,81 @@ export async function sendMessage(
   }
 
   try {
-    // Wait for page to load and find message button using CSS selectors
-    const messageButton = await page.$(LINKEDIN_SELECTORS.MESSAGE_BUTTON);
-    if (!messageButton) {
+    // Verify page stability before attempting DOM interactions
+    console.log('Waiting for page elements to stabilize...');
+    const isStable = await verifyPageStability(page, 2000);
+    if (!isStable) {
+      console.warn('Page stability check failed, but proceeding with caution');
+    }
+    
+    // Check for message button availability using safe evaluation
+    const buttonState = await page.evaluate(() => {
+      const messageBtn = document.querySelector('button[aria-label*="Message"], button[aria-label*="Nachricht"]') as HTMLButtonElement;
+      const connectBtn = document.querySelector('button[aria-label*="Connect"], button[aria-label*="Vernetzen"]');
+      
+      return {
+        hasMessageButton: !!messageBtn,
+        hasConnectButton: !!connectBtn,
+        messageText: messageBtn?.textContent || '',
+        isMessageEnabled: messageBtn ? !messageBtn.disabled : false
+      };
+    });
+    
+    if (!buttonState.hasMessageButton) {
+      if (buttonState.hasConnectButton) {
+        throw new Error('User is not connected - connect first before messaging');
+      }
       throw new Error('Message button not found - user may not be connected or messaging is disabled');
     }
     
-    await messageButton.click();
-    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for message window to open
-
-    // Find the message input area
-    const messageInput = await page.waitForSelector(
-      LINKEDIN_SELECTORS.MESSAGE_TEXTAREA,
-      { timeout: 10000 }
+    if (!buttonState.isMessageEnabled) {
+      throw new Error('Message button is disabled - messaging may not be available');
+    }
+    
+    // Use safe element interaction for message button
+    console.log('Message button found, clicking with safe interaction...');
+    await safeElementInteraction(
+      page,
+      LINKEDIN_SELECTORS.MESSAGE_BUTTON,
+      async (messageButton) => {
+        await messageButton.click();
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for message window to open
+        return true;
+      },
+      { timeout: 10000, retries: 3 }
     );
-    
-    if (!messageInput) {
-      throw new Error('Message input area not found');
-    }
 
-    // Clear any existing text and type the message
-    await messageInput.click();
-    await page.keyboard.down('Control');
-    await page.keyboard.press('a');
-    await page.keyboard.up('Control');
-    await page.keyboard.press('Delete');
-    
-    await new Promise(resolve => setTimeout(resolve, 500));
-    await messageInput.type(message);
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Use safe element interaction for message input
+    await safeElementInteraction(
+      page,
+      LINKEDIN_SELECTORS.MESSAGE_TEXTAREA,
+      async (messageInput) => {
+        // Clear any existing text and type the message
+        await messageInput.click();
+        await page.keyboard.down('Control');
+        await page.keyboard.press('a');
+        await page.keyboard.up('Control');
+        await page.keyboard.press('Delete');
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await messageInput.type(message);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return true;
+      },
+      { timeout: 10000, retries: 3 }
+    );
 
-    // Find and click send button using CSS selectors
-    const sendBtn = await page.waitForSelector(LINKEDIN_SELECTORS.SEND_MESSAGE_BUTTON, { timeout: 5000 });
-    if (!sendBtn) {
-      throw new Error('Send message button not found');
-    }
-    
-    await sendBtn.click();
-    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for message to be sent
+    // Use safe element interaction for send button
+    await safeElementInteraction(
+      page,
+      LINKEDIN_SELECTORS.SEND_MESSAGE_BUTTON,
+      async (sendBtn) => {
+        await sendBtn.click();
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for message to be sent
+        return true;
+      },
+      { timeout: 5000, retries: 3 }
+    );
 
     return {
       success: true,
