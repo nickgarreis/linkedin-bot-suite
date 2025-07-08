@@ -96,6 +96,9 @@ importers:
       node-fetch:
         specifier: 2.7.0
         version: 2.7.0
+      uuid:
+        specifier: ^9.0.1
+        version: 9.0.1
     devDependencies:
       '@types/cors':
         specifier: ^2.8.17
@@ -118,6 +121,9 @@ importers:
       '@types/node-fetch':
         specifier: 2.6.12
         version: 2.6.12
+      '@types/uuid':
+        specifier: ^9.0.7
+        version: 9.0.8
       ts-node:
         specifier: ^10.9.2
         version: 10.9.2(@types/node@24.0.10)(typescript@5.8.3)
