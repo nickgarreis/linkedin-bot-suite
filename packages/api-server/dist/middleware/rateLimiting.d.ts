@@ -1,4 +1,4 @@
-export declare const defaultRateLimit: import("express-rate-limit").RateLimitRequestHandler;
-export declare const webhookRateLimit: import("express-rate-limit").RateLimitRequestHandler;
-export declare const bulkRateLimit: import("express-rate-limit").RateLimitRequestHandler;
-export declare const createCustomRateLimit: (windowMs: number, max: number) => import("express-rate-limit").RateLimitRequestHandler;
+export declare const defaultRateLimit: any;
+export declare const webhookRateLimit: any;
+export declare const bulkRateLimit: any;
+export declare const createCustomRateLimit: (windowMs: number, max: number) => any;

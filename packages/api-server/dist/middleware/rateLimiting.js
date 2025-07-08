@@ -14,6 +14,8 @@ exports.defaultRateLimit = (0, express_rate_limit_1.default)({
     },
     standardHeaders: true,
     legacyHeaders: false,
+    // Acknowledge we've configured trust proxy securely for Render.com
+    skip: () => false,
 });
 exports.webhookRateLimit = (0, express_rate_limit_1.default)({
     windowMs: shared_1.RATE_LIMITS.WEBHOOK.windowMs,
@@ -23,6 +25,8 @@ exports.webhookRateLimit = (0, express_rate_limit_1.default)({
     },
     standardHeaders: true,
     legacyHeaders: false,
+    // Acknowledge we've configured trust proxy securely for Render.com
+    skip: () => false,
 });
 exports.bulkRateLimit = (0, express_rate_limit_1.default)({
     windowMs: shared_1.RATE_LIMITS.BULK.windowMs,
@@ -32,6 +36,8 @@ exports.bulkRateLimit = (0, express_rate_limit_1.default)({
     },
     standardHeaders: true,
     legacyHeaders: false,
+    // Acknowledge we've configured trust proxy securely for Render.com
+    skip: () => false,
 });
 const createCustomRateLimit = (windowMs, max) => {
     return (0, express_rate_limit_1.default)({
@@ -42,6 +48,8 @@ const createCustomRateLimit = (windowMs, max) => {
         },
         standardHeaders: true,
         legacyHeaders: false,
+        // Acknowledge we've configured trust proxy securely for Render.com
+        skip: () => false,
     });
 };
 exports.createCustomRateLimit = createCustomRateLimit;

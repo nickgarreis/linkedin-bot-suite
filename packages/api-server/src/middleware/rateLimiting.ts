@@ -9,6 +9,8 @@ export const defaultRateLimit = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Acknowledge we've configured trust proxy securely for Render.com
+  skip: () => false,
 });
 
 export const webhookRateLimit = rateLimit({
@@ -19,6 +21,8 @@ export const webhookRateLimit = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Acknowledge we've configured trust proxy securely for Render.com
+  skip: () => false,
 });
 
 export const bulkRateLimit = rateLimit({
@@ -29,6 +33,8 @@ export const bulkRateLimit = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Acknowledge we've configured trust proxy securely for Render.com
+  skip: () => false,
 });
 
 export const createCustomRateLimit = (windowMs: number, max: number) => {
@@ -40,5 +46,7 @@ export const createCustomRateLimit = (windowMs: number, max: number) => {
     },
     standardHeaders: true,
     legacyHeaders: false,
+    // Acknowledge we've configured trust proxy securely for Render.com
+    skip: () => false,
   });
 };

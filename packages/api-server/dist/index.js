@@ -18,8 +18,8 @@ const internal_1 = __importDefault(require("./routes/internal"));
 // Validate configuration
 (0, config_1.validateConfig)();
 const app = (0, express_1.default)();
-// Trust proxy for Render.com environment (fixes rate limiting behind proxy)
-app.set('trust proxy', true);
+// Trust only Render's proxy (more secure than trusting all proxies)
+app.set('trust proxy', 1);
 // Security middleware
 app.use((0, helmet_1.default)());
 app.use((0, cors_1.default)(config_1.CONFIG.cors));
