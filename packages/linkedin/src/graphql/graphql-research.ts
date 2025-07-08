@@ -36,6 +36,42 @@ export class LinkedInGraphQLResearcher {
   private responseListener?: (res: any) => void;
 
   /**
+   * Detects Chrome's new headless mode where DevTools-Fetch is disabled.
+   * In new headless mode (--headless=new), request interception is not supported.
+   */
+  private isNewHeadlessMode(page: Page): boolean {
+    try {
+      // Check browser launch arguments for new headless mode indicators
+      const browser = page.browser();
+      const args: string[] = (browser as any)?._process?.spawnargs || [];
+      
+      // Look for --headless=new or similar patterns
+      const hasNewHeadless = args.some(arg => 
+        arg.startsWith('--headless') && 
+        (arg.includes('=new') || arg === '--headless=new')
+      );
+      
+      if (hasNewHeadless) {
+        console.log('🔍 Detected Chrome new headless mode from launch args');
+        return true;
+      }
+      
+      // Additional check: look for headless: 'new' in launch options
+      // This covers cases where headless mode is set via launch options
+      const launchOptions = (browser as any)?._options || {};
+      if (launchOptions.headless === 'new') {
+        console.log('🔍 Detected Chrome new headless mode from launch options');
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.warn('⚠️ Could not detect headless mode, assuming compatible:', error);
+      return false; // Assume compatible if detection fails
+    }
+  }
+
+  /**
    * Start intercepting network requests to capture GraphQL API calls
    */
   async startInterception(page: Page): Promise<void> {
@@ -46,6 +82,18 @@ export class LinkedInGraphQLResearcher {
     this.isIntercepting = true;
     this.interceptedCalls = [];
 
+    // ────────────────────────────────────────────────────────────────────────
+    // Abort early when interception cannot work (Chrome --headless=new).
+    // ────────────────────────────────────────────────────────────────────────
+    if (this.isNewHeadlessMode(page)) {
+      console.warn('⚠️ Chrome is running in "--headless=new" mode; ' +
+        'network request interception is not supported. ' +
+        'Skipping GraphQL interception.');
+      this.interceptionEnabled = false;
+      this.isIntercepting = false;
+      return;
+    }
+
     // Enable request interception with safety checks
     try {
       await page.setRequestInterception(true);
@@ -55,7 +103,9 @@ export class LinkedInGraphQLResearcher {
       console.warn('⚠️ Failed to enable request interception:', (error as Error).message);
       console.warn('⚠️ GraphQL research will proceed without network interception');
       this.interceptionEnabled = false;
-      // Continue without interception - we can still perform actions and analyze results
+      // Don't attach listeners when interception is unavailable
+      this.isIntercepting = false;
+      return;
     }
 
     // Store the request listener for proper cleanup
@@ -163,6 +213,12 @@ export class LinkedInGraphQLResearcher {
    */
   async stopInterception(page: Page): Promise<void> {
     if (!this.isIntercepting) {
+      return;
+    }
+
+    // No-op if interception had never been enabled (e.g., new headless mode)
+    if (!this.interceptionEnabled) {
+      this.isIntercepting = false;
       return;
     }
 
