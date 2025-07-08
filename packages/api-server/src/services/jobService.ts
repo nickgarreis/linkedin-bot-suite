@@ -1,10 +1,21 @@
 import { Queue } from 'bullmq';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { CONFIG } from '../config';
 import { LinkedInJob, DEFAULT_JOB_OPTIONS, JOB_STATUS } from '@linkedin-bot-suite/shared';
 import { v4 as uuidv4 } from 'uuid';
 
-const supabase = createClient(CONFIG.supabase.url, CONFIG.supabase.serviceRoleKey);
+let supabase: SupabaseClient | null = null;
+
+function getSupabaseClient(): SupabaseClient {
+  if (!supabase) {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE ||
+        process.env.SUPABASE_URL === 'https://placeholder.supabase.co') {
+      throw new Error('Supabase credentials not configured. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE in Render dashboard.');
+    }
+    supabase = createClient(CONFIG.supabase.url, CONFIG.supabase.serviceRoleKey);
+  }
+  return supabase;
+}
 
 export class JobService {
   private queue: Queue | null = null;
@@ -27,7 +38,7 @@ export class JobService {
     const jobId = uuidv4();
     
     // Log job creation in database
-    await supabase.from('job_history').insert({
+    await getSupabaseClient().from('job_history').insert({
       id: jobId,
       workflow_run_id: jobData.workflowId,
       job_type: jobData.type,
@@ -66,7 +77,7 @@ export class JobService {
     const workflowRunId = workflowId || uuidv4();
     
     // Create workflow run record
-    await supabase.from('workflow_runs').insert({
+    await getSupabaseClient().from('workflow_runs').insert({
       id: workflowRunId,
       workflow_id: workflowId || 'bulk-' + Date.now(),
       status: 'pending',
@@ -104,7 +115,7 @@ export class JobService {
 
   async getJobStatus(jobId: string) {
     const job = await this.getQueue().getJob(jobId);
-    const { data: jobHistory } = await supabase
+    const { data: jobHistory } = await getSupabaseClient()
       .from('job_history')
       .select('*')
       .eq('id', jobId)
@@ -125,7 +136,7 @@ export class JobService {
   }
 
   async getWorkflowStatus(workflowRunId: string) {
-    const { data: workflowRun } = await supabase
+    const { data: workflowRun } = await getSupabaseClient()
       .from('workflow_runs')
       .select('*')
       .eq('id', workflowRunId)
@@ -135,7 +146,7 @@ export class JobService {
       return { error: 'Workflow run not found' };
     }
 
-    const { data: jobs } = await supabase
+    const { data: jobs } = await getSupabaseClient()
       .from('job_history')
       .select('*')
       .eq('workflow_run_id', workflowRunId);
@@ -158,7 +169,7 @@ export class JobService {
       await job.remove();
     }
     
-    await supabase
+    await getSupabaseClient()
       .from('job_history')
       .delete()
       .eq('id', jobId);

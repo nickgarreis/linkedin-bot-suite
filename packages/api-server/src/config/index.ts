@@ -20,8 +20,8 @@ export const CONFIG = {
     prefix: process.env.BULLMQ_PREFIX || 'bull',
   },
   supabase: {
-    url: process.env.SUPABASE_URL!,
-    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE!,
+    url: process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE || 'placeholder_key',
   },
   cors: {
     origin: process.env.CORS_ORIGIN?.split(',') || ['*'],
@@ -33,16 +33,29 @@ export const CONFIG = {
 } as const;
 
 export const validateConfig = () => {
-  const required = [
+  const criticalRequired = [
     'REDIS_URL',
+  ];
+  
+  const optionalRequired = [
     'SUPABASE_URL',
     'SUPABASE_SERVICE_ROLE',
   ];
 
-  // Check required environment variables
-  for (const key of required) {
+  // Check critical environment variables (deployment blockers)
+  for (const key of criticalRequired) {
     if (!process.env[key]) {
-      throw new Error(`Missing required environment variable: ${key}`);
+      throw new Error(`Missing critical environment variable: ${key}`);
+    }
+  }
+  
+  // Check optional environment variables (warnings only for deployment)
+  for (const key of optionalRequired) {
+    if (!process.env[key]) {
+      console.warn(`⚠️  WARNING: Missing environment variable: ${key}`);
+      console.warn(`   Some features may not work until this is configured in Render dashboard`);
+    } else {
+      console.log(`✅ ${key} configured`);
     }
   }
 

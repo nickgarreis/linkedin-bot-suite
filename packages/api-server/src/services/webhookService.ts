@@ -1,9 +1,20 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import fetch from 'node-fetch';
 import { CONFIG } from '../config';
 import { WebhookPayload, JOB_STATUS } from '@linkedin-bot-suite/shared';
 
-const supabase = createClient(CONFIG.supabase.url, CONFIG.supabase.serviceRoleKey);
+let supabase: SupabaseClient | null = null;
+
+function getSupabaseClient(): SupabaseClient {
+  if (!supabase) {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE ||
+        process.env.SUPABASE_URL === 'https://placeholder.supabase.co') {
+      throw new Error('Supabase credentials not configured. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE in Render dashboard.');
+    }
+    supabase = createClient(CONFIG.supabase.url, CONFIG.supabase.serviceRoleKey);
+  }
+  return supabase;
+}
 
 export class WebhookService {
   async sendWebhook(url: string, payload: WebhookPayload) {
@@ -44,13 +55,13 @@ export class WebhookService {
         updateData.error_message = error;
       }
 
-      await supabase
+      await getSupabaseClient()
         .from('job_history')
         .update(updateData)
         .eq('id', jobId);
 
       // Get job details for webhook
-      const { data: jobHistory } = await supabase
+      const { data: jobHistory } = await getSupabaseClient()
         .from('job_history')
         .select('*')
         .eq('id', jobId)
@@ -92,7 +103,7 @@ export class WebhookService {
   }
 
   private async updateWorkflowRunCounters(workflowRunId: string) {
-    const { data: jobs } = await supabase
+    const { data: jobs } = await getSupabaseClient()
       .from('job_history')
       .select('status')
       .eq('workflow_run_id', workflowRunId);
@@ -119,7 +130,7 @@ export class WebhookService {
       updateData.completed_at = new Date().toISOString();
     }
 
-    await supabase
+    await getSupabaseClient()
       .from('workflow_runs')
       .update(updateData)
       .eq('id', workflowRunId);

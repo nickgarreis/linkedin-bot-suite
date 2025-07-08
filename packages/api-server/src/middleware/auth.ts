@@ -1,10 +1,20 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { CONFIG } from '../config';
 import { ApiKey } from '@linkedin-bot-suite/shared';
 
-const supabase = createClient(CONFIG.supabase.url, CONFIG.supabase.serviceRoleKey);
+let supabase: SupabaseClient | null = null;
+
+function getSupabaseClient(): SupabaseClient {
+  if (!supabase) {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE) {
+      throw new Error('Supabase credentials not configured. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE in Render dashboard.');
+    }
+    supabase = createClient(CONFIG.supabase.url, CONFIG.supabase.serviceRoleKey);
+  }
+  return supabase;
+}
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -26,7 +36,7 @@ export const authenticateApiKey = async (req: AuthenticatedRequest, res: Respons
     const crypto = require('crypto');
     const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
 
-    const { data: apiKeyData, error } = await supabase
+    const { data: apiKeyData, error } = await getSupabaseClient()
       .from('api_keys')
       .select('*')
       .eq('key_hash', keyHash)
@@ -43,7 +53,7 @@ export const authenticateApiKey = async (req: AuthenticatedRequest, res: Respons
     }
 
     // Update last used timestamp
-    await supabase
+    await getSupabaseClient()
       .from('api_keys')
       .update({ last_used_at: new Date().toISOString() })
       .eq('id', apiKeyData.id);
