@@ -79,18 +79,9 @@ export async function initLinkedInContext(
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       
-      // Network configuration for LinkedIn rate limiting resistance
+      // Basic network configuration (stable for containers)
       '--disable-features=VizDisplayCompositor',
       '--disable-ipc-flooding-protection',
-      '--enable-features=NetworkServiceInProcess',
-      '--disable-features=NetworkService',
-      '--ignore-certificate-errors-spki-list',
-      '--ignore-ssl-errors',
-      '--ignore-certificate-errors',
-      '--disable-site-isolation-trials',
-      '--disable-features=BlockInsecurePrivateNetworkRequests',
-      '--force-color-profile=srgb',
-      '--disable-background-networking',
       
       // User data and profile
       `--user-data-dir=${userDataDir}`,
@@ -145,9 +136,39 @@ export async function initLinkedInContext(
   let page: Page | null = null;
 
   try {
+    // Browser launch with retry logic
     console.log('Launching Chrome browser...');
-    browser = await pptr.launch(launchOptions);
-    console.log('Browser launched successfully');
+    let browserLaunched = false;
+    let lastLaunchError: Error | null = null;
+    
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        browser = await pptr.launch(launchOptions);
+        browserLaunched = true;
+        console.log(`Browser launched successfully on attempt ${attempt}`);
+        break;
+      } catch (launchError: any) {
+        lastLaunchError = launchError;
+        console.warn(`Browser launch attempt ${attempt}/3 failed: ${launchError.message}`);
+        
+        // If it's a Target protocol error, try with simpler options
+        if (launchError.message.includes('Target.') || launchError.message.includes('Protocol error')) {
+          if (attempt < 3) {
+            console.log('Retrying browser launch with simplified options...');
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
+            continue;
+          }
+        }
+        
+        if (attempt === 3) {
+          throw launchError;
+        }
+      }
+    }
+    
+    if (!browserLaunched || !browser) {
+      throw new Error(`Failed to launch browser after 3 attempts. Last error: ${lastLaunchError?.message}`);
+    }
     
     // Initial browser health check
     const browserHealthy = await checkBrowserHealth(browser);
@@ -184,10 +205,28 @@ export async function initLinkedInContext(
     // Set user agent BEFORE navigating - updated to current Chrome 137
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36');
     
-    // Set additional headers to appear more legitimate
+    // Enhanced realistic headers with variation
+    const headerVariations = [
+      {
+        'Accept-Language': 'en-US,en;q=0.9,de;q=0.8',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Sec-CH-UA': '"Not_A Brand";v="8", "Chromium";v="137", "Google Chrome";v="137"',
+        'Sec-CH-UA-Mobile': '?0',
+        'Sec-CH-UA-Platform': '"Windows"'
+      },
+      {
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+        'Sec-CH-UA': '"Not_A Brand";v="8", "Chromium";v="137", "Google Chrome";v="137"',
+        'Sec-CH-UA-Mobile': '?0',
+        'Sec-CH-UA-Platform': '"Linux"'
+      }
+    ];
+    
+    const selectedHeaders = headerVariations[Math.floor(Math.random() * headerVariations.length)];
+    
     await page.setExtraHTTPHeaders({
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+      ...selectedHeaders,
       'Accept-Encoding': 'gzip, deflate, br',
       'Connection': 'keep-alive',
       'Upgrade-Insecure-Requests': '1',
@@ -195,7 +234,8 @@ export async function initLinkedInContext(
       'Sec-Fetch-Mode': 'navigate',
       'Sec-Fetch-Site': 'none',
       'Sec-Fetch-User': '?1',
-      'Cache-Control': 'max-age=0'
+      'Cache-Control': 'no-cache',
+      'DNT': '1'
     });
     
     // Enhanced anti-detection measures with realistic browser fingerprinting
