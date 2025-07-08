@@ -59,13 +59,13 @@ export async function initLinkedInContext(
 
   const userDataDir = `/tmp/chrome-user-data-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   
-  // Enhanced user agent rotation for better anti-detection
+  // Updated user agent rotation with current Chrome versions (Jan 2025)
   const userAgents = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36', // Your exact user agent
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
   ];
   const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
   console.log('Using user agent:', randomUserAgent);
@@ -78,6 +78,17 @@ export async function initLinkedInContext(
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
+      
+      // Network and DNS configuration for containers (Critical for Chrome 137)
+      '--disable-features=NetworkService',
+      '--enable-features=NetworkServiceInProcess',
+      '--ignore-certificate-errors-spki-list',
+      '--ignore-ssl-errors',
+      '--ignore-certificate-errors',
+      '--disable-site-isolation-trials',
+      '--disable-features=BlockInsecurePrivateNetworkRequests',
+      '--aggressive-cache-discard',
+      '--disable-background-networking',
       
       // Anti-detection measures
       '--disable-blink-features=AutomationControlled',
@@ -191,8 +202,8 @@ export async function initLinkedInContext(
     // Use safe storage clearing to handle SecurityError gracefully
     await safeClearStorage(page);
     
-    // Set user agent BEFORE navigating - updated to latest Chrome
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    // Set user agent BEFORE navigating - updated to current Chrome 137
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36');
     
     // Set additional headers to appear more legitimate
     await page.setExtraHTTPHeaders({

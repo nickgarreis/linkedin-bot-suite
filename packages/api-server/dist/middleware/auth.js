@@ -7,7 +7,16 @@ exports.requirePermission = exports.authenticateJWT = exports.authenticateApiKey
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const supabase_js_1 = require("@supabase/supabase-js");
 const config_1 = require("../config");
-const supabase = (0, supabase_js_1.createClient)(config_1.CONFIG.supabase.url, config_1.CONFIG.supabase.serviceRoleKey);
+let supabase = null;
+function getSupabaseClient() {
+    if (!supabase) {
+        if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE) {
+            throw new Error('Supabase credentials not configured. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE in Render dashboard.');
+        }
+        supabase = (0, supabase_js_1.createClient)(config_1.CONFIG.supabase.url, config_1.CONFIG.supabase.serviceRoleKey);
+    }
+    return supabase;
+}
 const authenticateApiKey = async (req, res, next) => {
     try {
         const apiKey = req.headers[config_1.CONFIG.auth.apiKeyHeader];
@@ -17,7 +26,7 @@ const authenticateApiKey = async (req, res, next) => {
         // Hash the API key for lookup
         const crypto = require('crypto');
         const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
-        const { data: apiKeyData, error } = await supabase
+        const { data: apiKeyData, error } = await getSupabaseClient()
             .from('api_keys')
             .select('*')
             .eq('key_hash', keyHash)
@@ -31,7 +40,7 @@ const authenticateApiKey = async (req, res, next) => {
             return res.status(401).json({ error: 'API key expired' });
         }
         // Update last used timestamp
-        await supabase
+        await getSupabaseClient()
             .from('api_keys')
             .update({ last_used_at: new Date().toISOString() })
             .eq('id', apiKeyData.id);

@@ -2,6 +2,7 @@ import { LinkedInJob } from '@linkedin-bot-suite/shared';
 export declare class JobService {
     private queue;
     constructor();
+    private getQueue;
     createJob(jobData: LinkedInJob, clientSlug: string): Promise<{
         jobId: string;
         queueId: string | undefined;

@@ -3,7 +3,7 @@ FROM node:18-slim
 # Install specific pnpm version and basic dependencies
 RUN npm install -g pnpm@10.12.4
 
-# Install Chrome dependencies and Google Chrome
+# Install Chrome dependencies, network tools, and Google Chrome
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -34,6 +34,11 @@ RUN apt-get update && apt-get install -y \
     libcairo2 \
     libatspi2.0-0 \
     libgtk-3-0 \
+    # Network debugging and DNS tools
+    dnsutils \
+    iputils-ping \
+    net-tools \
+    curl \
     # Process management
     dumb-init \
     && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
@@ -41,6 +46,10 @@ RUN apt-get update && apt-get install -y \
     && apt-get update \
     && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure DNS for better network reliability
+RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf \
+    && echo "nameserver 8.8.4.4" >> /etc/resolv.conf
 
 # Create necessary directories with proper permissions
 RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix

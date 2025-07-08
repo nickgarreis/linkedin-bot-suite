@@ -6,18 +6,35 @@ const supabase_js_1 = require("@supabase/supabase-js");
 const config_1 = require("../config");
 const shared_1 = require("@linkedin-bot-suite/shared");
 const uuid_1 = require("uuid");
-const supabase = (0, supabase_js_1.createClient)(config_1.CONFIG.supabase.url, config_1.CONFIG.supabase.serviceRoleKey);
+let supabase = null;
+function getSupabaseClient() {
+    if (!supabase) {
+        if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE ||
+            process.env.SUPABASE_URL === 'https://placeholder.supabase.co') {
+            throw new Error('Supabase credentials not configured. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE in Render dashboard.');
+        }
+        supabase = (0, supabase_js_1.createClient)(config_1.CONFIG.supabase.url, config_1.CONFIG.supabase.serviceRoleKey);
+    }
+    return supabase;
+}
 class JobService {
     constructor() {
-        this.queue = new bullmq_1.Queue(config_1.CONFIG.bullmq.queueName, {
-            connection: { url: config_1.CONFIG.redis.url },
-            prefix: config_1.CONFIG.bullmq.prefix,
-        });
+        this.queue = null;
+        // Lazy initialization - don't connect to Redis until first use
+    }
+    getQueue() {
+        if (!this.queue) {
+            this.queue = new bullmq_1.Queue(config_1.CONFIG.bullmq.queueName, {
+                connection: { url: config_1.CONFIG.redis.url },
+                prefix: config_1.CONFIG.bullmq.prefix,
+            });
+        }
+        return this.queue;
     }
     async createJob(jobData, clientSlug) {
         const jobId = (0, uuid_1.v4)();
         // Log job creation in database
-        await supabase.from('job_history').insert({
+        await getSupabaseClient().from('job_history').insert({
             id: jobId,
             workflow_run_id: jobData.workflowId,
             job_type: jobData.type,
@@ -27,7 +44,7 @@ class JobService {
             created_at: new Date().toISOString(),
         });
         // Add job to BullMQ queue
-        const job = await this.queue.add(jobData.type, {
+        const job = await this.getQueue().add(jobData.type, {
             ...jobData,
             id: jobId,
             clientSlug,
@@ -48,7 +65,7 @@ class JobService {
     async createBulkJobs(jobs, clientSlug, workflowId) {
         const workflowRunId = workflowId || (0, uuid_1.v4)();
         // Create workflow run record
-        await supabase.from('workflow_runs').insert({
+        await getSupabaseClient().from('workflow_runs').insert({
             id: workflowRunId,
             workflow_id: workflowId || 'bulk-' + Date.now(),
             status: 'pending',
@@ -79,8 +96,8 @@ class JobService {
         };
     }
     async getJobStatus(jobId) {
-        const job = await this.queue.getJob(jobId);
-        const { data: jobHistory } = await supabase
+        const job = await this.getQueue().getJob(jobId);
+        const { data: jobHistory } = await getSupabaseClient()
             .from('job_history')
             .select('*')
             .eq('id', jobId)
@@ -99,7 +116,7 @@ class JobService {
         };
     }
     async getWorkflowStatus(workflowRunId) {
-        const { data: workflowRun } = await supabase
+        const { data: workflowRun } = await getSupabaseClient()
             .from('workflow_runs')
             .select('*')
             .eq('id', workflowRunId)
@@ -107,7 +124,7 @@ class JobService {
         if (!workflowRun) {
             return { error: 'Workflow run not found' };
         }
-        const { data: jobs } = await supabase
+        const { data: jobs } = await getSupabaseClient()
             .from('job_history')
             .select('*')
             .eq('workflow_run_id', workflowRunId);
@@ -123,11 +140,11 @@ class JobService {
         };
     }
     async deleteJob(jobId) {
-        const job = await this.queue.getJob(jobId);
+        const job = await this.getQueue().getJob(jobId);
         if (job) {
             await job.remove();
         }
-        await supabase
+        await getSupabaseClient()
             .from('job_history')
             .delete()
             .eq('id', jobId);

@@ -7,7 +7,6 @@ const bullmq_1 = require("bullmq");
 const dotenv_1 = require("dotenv");
 const bot_core_1 = require("@linkedin-bot-suite/bot-core");
 const node_fetch_1 = __importDefault(require("node-fetch"));
-const ioredis_1 = __importDefault(require("ioredis"));
 (0, dotenv_1.config)();
 async function validateCookies() {
     try {
@@ -41,7 +40,7 @@ console.log(`Concurrency: ${concurrency}`);
 const worker = new bullmq_1.Worker(queueName, bot_core_1.processJob, {
     connection: {
         url: process.env.REDIS_URL,
-        // Enhanced Redis connection options with optimized timeouts
+        // Enhanced Redis connection options with increased timeouts for cloud environments
         retryDelayOnFailover: 100,
         lazyConnect: true,
         maxRetriesPerRequest: 5,
@@ -49,10 +48,14 @@ const worker = new bullmq_1.Worker(queueName, bot_core_1.processJob, {
         enableReadyCheck: true,
         family: 4, // Use IPv4
         keepAlive: 15000,
-        connectTimeout: 5000,
-        commandTimeout: 3000,
+        connectTimeout: 10000, // Increased from 5000ms to 10000ms
+        commandTimeout: 15000, // Increased from 3000ms to 15000ms
         // Additional stability options
         enableOfflineQueue: false,
+        reconnectOnError: (err) => {
+            console.log('Redis reconnectOnError triggered:', err.message);
+            return err.message.includes('READONLY') || err.message.includes('ECONNRESET');
+        },
     },
     concurrency: 1, // Reduced concurrency for stability
     prefix: process.env.BULLMQ_PREFIX || 'bull',
@@ -66,73 +69,148 @@ worker.on('ready', () => {
 });
 worker.on('error', (err) => {
     console.error('Worker error:', err);
-    // Check if it's a Redis connection error
-    if (err.message.includes('ECONNREFUSED') ||
+    // Enhanced error categorization and logging
+    if (err.message.includes('Command timed out')) {
+        console.error('❌ Redis command timeout detected:', {
+            error: err.message,
+            timestamp: new Date().toISOString(),
+            suggestion: 'Consider upgrading Redis plan or checking network connectivity'
+        });
+    }
+    else if (err.message.includes('ECONNREFUSED') ||
         err.message.includes('ETIMEDOUT') ||
         err.message.includes('Connection is closed')) {
-        console.error('Redis connection error detected, attempting to reconnect...');
-        // The worker will automatically attempt to reconnect due to Redis client settings
+        console.error('❌ Redis connection error detected, attempting to reconnect...', {
+            error: err.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+    else if (err.message.includes('READONLY')) {
+        console.error('❌ Redis in read-only mode (failover in progress):', {
+            error: err.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+    else {
+        console.error('❌ Unhandled worker error:', {
+            error: err.message,
+            stack: err.stack,
+            timestamp: new Date().toISOString()
+        });
     }
 });
 worker.on('stalled', (jobId) => {
     console.warn(`Job ${jobId} stalled`);
 });
-// Redis connection monitoring - using manual Redis client for monitoring
+// Redis connection monitoring - reuse BullMQ connection to reduce connection count
 let redisMonitorClient = null;
 async function initRedisMonitoring() {
     try {
-        redisMonitorClient = new ioredis_1.default(process.env.REDIS_URL, {
-            maxRetriesPerRequest: 3,
-            connectTimeout: 5000,
-            commandTimeout: 2000,
-            enableOfflineQueue: false,
-            lazyConnect: false,
-        });
-        redisMonitorClient.on('connect', () => {
-            console.log('✅ Redis monitor connected successfully');
-        });
-        redisMonitorClient.on('ready', () => {
-            console.log('✅ Redis monitor ready for commands');
-        });
-        redisMonitorClient.on('error', (err) => {
-            console.error('❌ Redis monitor connection error:', err.message);
-        });
-        redisMonitorClient.on('disconnect', () => {
-            console.warn('⚠️ Redis monitor connection closed');
-        });
-        redisMonitorClient.on('reconnecting', () => {
-            console.log('🔄 Redis monitor reconnecting...');
-        });
-        // ioredis connects automatically
+        // Get the Redis connection from the BullMQ worker to reuse it
+        // This reduces the total number of connections to Redis
+        const workerRedis = await worker.client;
+        redisMonitorClient = workerRedis;
+        console.log('✅ Redis monitor initialized (reusing BullMQ connection)');
     }
     catch (error) {
         console.error('Failed to initialize Redis monitoring:', error);
+        // Fallback to separate connection if needed
+        redisMonitorClient = null;
     }
 }
 // Initialize Redis monitoring
 initRedisMonitoring();
-// Health check function
+// Enhanced health check function with comprehensive performance monitoring
+let healthCheckStats = {
+    totalChecks: 0,
+    redisFailures: 0,
+    avgRedisPingTime: 0,
+    maxRedisPingTime: 0,
+    peakMemoryUsage: 0,
+    jobsProcessed: 0,
+    jobsCompleted: 0,
+    jobsFailed: 0
+};
 async function performHealthCheck() {
     try {
-        // Check Redis connection
+        healthCheckStats.totalChecks++;
+        // Check Redis connection with timeout measurement
         let redisHealthy = false;
+        let redisPingTime = 0;
         if (redisMonitorClient) {
             try {
+                const startTime = Date.now();
                 await redisMonitorClient.ping();
+                redisPingTime = Date.now() - startTime;
                 redisHealthy = true;
+                // Update Redis performance stats
+                healthCheckStats.avgRedisPingTime = Math.round((healthCheckStats.avgRedisPingTime + redisPingTime) / 2);
+                healthCheckStats.maxRedisPingTime = Math.max(healthCheckStats.maxRedisPingTime, redisPingTime);
             }
             catch (pingError) {
-                console.error('Redis ping failed:', pingError);
+                healthCheckStats.redisFailures++;
+                const errorMessage = pingError instanceof Error ? pingError.message : String(pingError);
+                console.error('❌ Redis ping failed:', {
+                    error: errorMessage,
+                    timestamp: new Date().toISOString(),
+                    clientStatus: redisMonitorClient.status,
+                    totalFailures: healthCheckStats.redisFailures
+                });
             }
         }
-        // Check worker status
+        // Check worker status and connection health
         const isRunning = !worker.closing;
-        console.log(`Health check: Redis ${redisHealthy ? '✅' : '❌'}, Worker ${isRunning ? '✅' : '❌'}, Active jobs: ${activeJobs}`);
-        return { redis: redisHealthy, worker: isRunning, activeJobs };
+        const memoryUsage = process.memoryUsage();
+        const currentMemoryMB = Math.round(memoryUsage.rss / 1024 / 1024);
+        // Update memory stats
+        healthCheckStats.peakMemoryUsage = Math.max(healthCheckStats.peakMemoryUsage, currentMemoryMB);
+        const healthStatus = {
+            redis: redisHealthy,
+            worker: isRunning,
+            activeJobs,
+            redisPingTime: redisPingTime > 0 ? `${redisPingTime}ms` : 'N/A',
+            memoryUsage: {
+                rss: currentMemoryMB + 'MB',
+                heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024) + 'MB',
+                peak: healthCheckStats.peakMemoryUsage + 'MB'
+            },
+            performance: {
+                avgRedisPing: healthCheckStats.avgRedisPingTime + 'ms',
+                maxRedisPing: healthCheckStats.maxRedisPingTime + 'ms',
+                redisFailureRate: `${Math.round((healthCheckStats.redisFailures / healthCheckStats.totalChecks) * 100)}%`,
+                jobsProcessed: healthCheckStats.jobsProcessed,
+                jobSuccessRate: healthCheckStats.jobsProcessed > 0 ?
+                    `${Math.round((healthCheckStats.jobsCompleted / healthCheckStats.jobsProcessed) * 100)}%` : 'N/A'
+            },
+            timestamp: new Date().toISOString()
+        };
+        console.log(`Health check: Redis ${redisHealthy ? '✅' : '❌'}, Worker ${isRunning ? '✅' : '❌'}, Active jobs: ${activeJobs}, Ping: ${redisPingTime}ms, Memory: ${healthStatus.memoryUsage.rss}, Success Rate: ${healthStatus.performance.jobSuccessRate}`);
+        // Enhanced alerting based on performance thresholds
+        if (redisHealthy && redisPingTime > 5000) {
+            console.warn('⚠️ Redis response time is slow:', redisPingTime + 'ms');
+        }
+        if (healthCheckStats.redisFailures / healthCheckStats.totalChecks > 0.1) {
+            console.warn('⚠️ High Redis failure rate:', healthCheckStats.redisFailures, 'failures out of', healthCheckStats.totalChecks, 'checks');
+        }
+        if (currentMemoryMB > 400) {
+            console.warn('⚠️ High memory usage detected:', currentMemoryMB + 'MB');
+        }
+        // Log detailed performance summary every 20 checks (10 minutes)
+        if (healthCheckStats.totalChecks % 20 === 0) {
+            console.log('📊 Performance Summary:', JSON.stringify(healthStatus.performance, null, 2));
+        }
+        return healthStatus;
     }
     catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
         console.error('Health check failed:', error);
-        return { redis: false, worker: false, activeJobs };
+        return {
+            redis: false,
+            worker: false,
+            activeJobs,
+            error: errorMessage,
+            timestamp: new Date().toISOString()
+        };
     }
 }
 // Periodic health checks every 30 seconds
@@ -142,14 +220,17 @@ let activeJobs = 0;
 let isShuttingDown = false;
 worker.on('active', (job) => {
     activeJobs++;
+    healthCheckStats.jobsProcessed++;
     console.log(`Processing job ${job.id}: ${job.data.type} - ${job.data.profileUrl} (Active: ${activeJobs})`);
 });
 worker.on('completed', (job, result) => {
     activeJobs--;
+    healthCheckStats.jobsCompleted++;
     console.log(`Job ${job.id} completed successfully (Active: ${activeJobs}):`, result);
 });
 worker.on('failed', (job, err) => {
     activeJobs--;
+    healthCheckStats.jobsFailed++;
     console.error(`Job ${job?.id} failed (Active: ${activeJobs}):`, err.message);
 });
 // Enhanced graceful shutdown with job completion handling
@@ -161,12 +242,17 @@ async function gracefulShutdown(signal) {
     isShuttingDown = true;
     console.log(`${signal} received, shutting down worker gracefully...`);
     console.log(`Active jobs: ${activeJobs}`);
+    // Set a hard timeout to prevent hanging
+    const shutdownTimeout = setTimeout(() => {
+        console.error('Graceful shutdown timeout reached (90s), forcing exit');
+        process.exit(1);
+    }, 90000); // 90 seconds total timeout
     try {
         // Stop accepting new jobs
         await worker.pause();
         console.log('Worker paused, no new jobs will be processed');
-        // Wait for active jobs to complete (max 60 seconds)
-        const maxWaitTime = 60000; // 60 seconds
+        // Wait for active jobs to complete (max 75 seconds, leaving 15s buffer)
+        const maxWaitTime = 75000; // 75 seconds  
         const checkInterval = 1000; // 1 second
         let waitTime = 0;
         while (activeJobs > 0 && waitTime < maxWaitTime) {
@@ -175,18 +261,23 @@ async function gracefulShutdown(signal) {
             waitTime += checkInterval;
         }
         if (activeJobs > 0) {
-            console.warn(`Forcing shutdown with ${activeJobs} active jobs remaining`);
+            console.warn(`Forcing shutdown with ${activeJobs} active jobs remaining after ${maxWaitTime / 1000}s`);
         }
         else {
             console.log('All active jobs completed successfully');
         }
         // Close the worker
+        console.log('Closing worker connections...');
         await worker.close();
         console.log('Worker closed successfully');
+        // Clean shutdown
+        clearTimeout(shutdownTimeout);
+        console.log('Graceful shutdown completed');
         process.exit(0);
     }
     catch (error) {
         console.error('Error during graceful shutdown:', error);
+        clearTimeout(shutdownTimeout);
         process.exit(1);
     }
 }

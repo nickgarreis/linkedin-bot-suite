@@ -5,7 +5,16 @@ const bullmq_1 = require("bullmq");
 const supabase_js_1 = require("@supabase/supabase-js");
 const config_1 = require("../config");
 const router = (0, express_1.Router)();
-const supabase = (0, supabase_js_1.createClient)(config_1.CONFIG.supabase.url, config_1.CONFIG.supabase.serviceRoleKey);
+let supabase = null;
+function getSupabaseClient() {
+    if (!supabase) {
+        if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE) {
+            throw new Error('Supabase credentials not configured');
+        }
+        supabase = (0, supabase_js_1.createClient)(config_1.CONFIG.supabase.url, config_1.CONFIG.supabase.serviceRoleKey);
+    }
+    return supabase;
+}
 // Basic health check
 router.get('/', async (req, res) => {
     res.json({
@@ -44,14 +53,20 @@ router.get('/detailed', async (req, res) => {
         health.status = 'degraded';
     }
     try {
-        // Check Supabase connection
-        const { data, error } = await supabase
-            .from('linkedin_accounts')
-            .select('count')
-            .limit(1);
-        if (error)
-            throw error;
-        health.checks.supabase = 'healthy';
+        // Check Supabase connection (only if configured)
+        if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE &&
+            process.env.SUPABASE_URL !== 'https://placeholder.supabase.co') {
+            const { data, error } = await getSupabaseClient()
+                .from('linkedin_accounts')
+                .select('count')
+                .limit(1);
+            if (error)
+                throw error;
+            health.checks.supabase = 'healthy';
+        }
+        else {
+            health.checks.supabase = 'not_configured';
+        }
     }
     catch (error) {
         health.checks.supabase = 'unhealthy';

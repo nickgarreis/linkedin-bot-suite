@@ -268,13 +268,19 @@ async function gracefulShutdown(signal: string) {
   console.log(`${signal} received, shutting down worker gracefully...`);
   console.log(`Active jobs: ${activeJobs}`);
   
+  // Set a hard timeout to prevent hanging
+  const shutdownTimeout = setTimeout(() => {
+    console.error('Graceful shutdown timeout reached (90s), forcing exit');
+    process.exit(1);
+  }, 90000); // 90 seconds total timeout
+  
   try {
     // Stop accepting new jobs
     await worker.pause();
     console.log('Worker paused, no new jobs will be processed');
     
-    // Wait for active jobs to complete (max 60 seconds)
-    const maxWaitTime = 60000; // 60 seconds
+    // Wait for active jobs to complete (max 75 seconds, leaving 15s buffer)
+    const maxWaitTime = 75000; // 75 seconds  
     const checkInterval = 1000; // 1 second
     let waitTime = 0;
     
@@ -285,18 +291,24 @@ async function gracefulShutdown(signal: string) {
     }
     
     if (activeJobs > 0) {
-      console.warn(`Forcing shutdown with ${activeJobs} active jobs remaining`);
+      console.warn(`Forcing shutdown with ${activeJobs} active jobs remaining after ${maxWaitTime/1000}s`);
     } else {
       console.log('All active jobs completed successfully');
     }
     
     // Close the worker
+    console.log('Closing worker connections...');
     await worker.close();
     console.log('Worker closed successfully');
     
+    // Clean shutdown
+    clearTimeout(shutdownTimeout);
+    console.log('Graceful shutdown completed');
     process.exit(0);
+    
   } catch (error) {
     console.error('Error during graceful shutdown:', error);
+    clearTimeout(shutdownTimeout);
     process.exit(1);
   }
 }

@@ -1,14 +1,28 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WebhookService = void 0;
 const supabase_js_1 = require("@supabase/supabase-js");
+const node_fetch_1 = __importDefault(require("node-fetch"));
 const config_1 = require("../config");
 const shared_1 = require("@linkedin-bot-suite/shared");
-const supabase = (0, supabase_js_1.createClient)(config_1.CONFIG.supabase.url, config_1.CONFIG.supabase.serviceRoleKey);
+let supabase = null;
+function getSupabaseClient() {
+    if (!supabase) {
+        if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE ||
+            process.env.SUPABASE_URL === 'https://placeholder.supabase.co') {
+            throw new Error('Supabase credentials not configured. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE in Render dashboard.');
+        }
+        supabase = (0, supabase_js_1.createClient)(config_1.CONFIG.supabase.url, config_1.CONFIG.supabase.serviceRoleKey);
+    }
+    return supabase;
+}
 class WebhookService {
     async sendWebhook(url, payload) {
         try {
-            const response = await fetch(url, {
+            const response = await (0, node_fetch_1.default)(url, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -41,12 +55,12 @@ class WebhookService {
             else {
                 updateData.error_message = error;
             }
-            await supabase
+            await getSupabaseClient()
                 .from('job_history')
                 .update(updateData)
                 .eq('id', jobId);
             // Get job details for webhook
-            const { data: jobHistory } = await supabase
+            const { data: jobHistory } = await getSupabaseClient()
                 .from('job_history')
                 .select('*')
                 .eq('id', jobId)
@@ -84,7 +98,7 @@ class WebhookService {
         }
     }
     async updateWorkflowRunCounters(workflowRunId) {
-        const { data: jobs } = await supabase
+        const { data: jobs } = await getSupabaseClient()
             .from('job_history')
             .select('status')
             .eq('workflow_run_id', workflowRunId);
@@ -106,7 +120,7 @@ class WebhookService {
         if (workflowStatus === 'completed' || workflowStatus === 'failed') {
             updateData.completed_at = new Date().toISOString();
         }
-        await supabase
+        await getSupabaseClient()
             .from('workflow_runs')
             .update(updateData)
             .eq('id', workflowRunId);
