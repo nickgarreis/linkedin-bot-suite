@@ -1,6 +1,6 @@
 import { Page } from 'puppeteer';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
-import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady, linkedInTyping, getActivityPattern, resetSessionState, waitForLinkedInPageLoad, waitForProfilePageReady, analyzePageStructure } from '../utils/browserHealth';
+import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady, linkedInTyping, getActivityPattern, resetSessionState, waitForLinkedInPageLoad, waitForProfilePageReady, analyzePageStructure, validateProfilePage, waitForPageStability } from '../utils/browserHealth';
 
 export async function sendInvitation(
   page: Page,
@@ -74,23 +74,40 @@ export async function sendInvitation(
   }
 
   try {
-    // Enhanced LinkedIn page loading validation
+    // Enhanced LinkedIn page loading validation with stability protection
     console.log('Validating LinkedIn page loading with comprehensive checks...');
-    const pageLoaded = await waitForLinkedInPageLoad(page, 'profile', 30000);
+    
+    // Step 1: Basic page loading
+    const pageLoaded = await waitForLinkedInPageLoad(page, 'profile', 35000);
     if (!pageLoaded) {
-      // If page didn't load properly, analyze the structure for debugging
-      console.log('Page loading failed, analyzing page structure...');
+      console.log('Basic page loading failed, analyzing page structure...');
       await analyzePageStructure(page);
       throw new Error('LinkedIn profile page failed to load properly');
     }
     
-    // Wait for profile page to be fully ready for interaction
-    console.log('Waiting for profile page to be fully ready for interaction...');
-    const profileReady = await waitForProfilePageReady(page, 25000);
-    if (!profileReady) {
-      console.warn('Profile page readiness check failed, analyzing current state...');
+    // Step 2: Multi-strategy profile validation
+    console.log('Running multi-strategy profile validation...');
+    const profileValidation = await validateProfilePage(page);
+    
+    if (!profileValidation.isValid) {
+      console.warn(`Profile validation failed with ${profileValidation.strategy} strategy (confidence: ${profileValidation.confidence})`);
+      console.log('Running final page analysis before failing...');
       await analyzePageStructure(page);
-      console.warn('Proceeding with caution despite readiness issues...');
+      
+      if (profileValidation.confidence < 0.3) {
+        throw new Error(`Profile page validation failed - insufficient confidence (${profileValidation.confidence}) using ${profileValidation.strategy} strategy`);
+      } else {
+        console.warn('Low confidence but proceeding with caution...');
+      }
+    } else {
+      console.log(`✅ Profile validated successfully using ${profileValidation.strategy} strategy (confidence: ${profileValidation.confidence})`);
+    }
+    
+    // Step 3: Additional page stability check to prevent state regression
+    console.log('Performing final stability check to prevent state regression...');
+    const finalStability = await waitForPageStability(page, 2000, 10000);
+    if (!finalStability) {
+      console.warn('Final stability check failed, but proceeding with validated profile...');
     }
 
     // Simulate human behavior on the profile page

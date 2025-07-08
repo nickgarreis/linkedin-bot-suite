@@ -958,11 +958,115 @@ export async function linkedInTyping(page: Page, text: string, context: 'message
 }
 
 /**
+ * Wait for page DOM to stabilize using MutationObserver
+ */
+export async function waitForPageStability(page: Page, stabilityPeriod: number = 2000, timeout: number = 20000): Promise<boolean> {
+  console.log(`Waiting for page to be stable for ${stabilityPeriod}ms...`);
+  
+  try {
+    const result = await page.evaluate((stabilityMs, timeoutMs) => {
+      return new Promise<boolean>((resolve) => {
+        let lastChangeTime = Date.now();
+        let timeoutId: NodeJS.Timeout;
+        let observer: MutationObserver;
+        let stabilityCheckId: NodeJS.Timeout;
+        
+        const cleanup = () => {
+          if (observer) observer.disconnect();
+          if (timeoutId) clearTimeout(timeoutId);
+          if (stabilityCheckId) clearTimeout(stabilityCheckId);
+        };
+        
+        const checkStability = () => {
+          const now = Date.now();
+          const timeSinceLastChange = now - lastChangeTime;
+          
+          if (timeSinceLastChange >= stabilityMs) {
+            cleanup();
+            resolve(true);
+          } else {
+            // Check again after remaining time
+            const remainingTime = stabilityMs - timeSinceLastChange;
+            stabilityCheckId = setTimeout(checkStability, remainingTime);
+          }
+        };
+        
+        // Set overall timeout
+        timeoutId = setTimeout(() => {
+          cleanup();
+          resolve(false);
+        }, timeoutMs);
+        
+        // Watch for DOM changes
+        observer = new MutationObserver((mutations) => {
+          // Filter out trivial changes (class changes, style changes)
+          const significantChanges = mutations.filter(mutation => {
+            if (mutation.type === 'childList') {
+              return mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0;
+            }
+            if (mutation.type === 'attributes') {
+              // Only count certain attribute changes as significant
+              const significantAttrs = ['data-control-name', 'aria-label', 'href', 'src'];
+              return significantAttrs.includes(mutation.attributeName || '');
+            }
+            return false;
+          });
+          
+          if (significantChanges.length > 0) {
+            lastChangeTime = Date.now();
+            
+            // Reset stability check
+            if (stabilityCheckId) clearTimeout(stabilityCheckId);
+            stabilityCheckId = setTimeout(checkStability, stabilityMs);
+          }
+        });
+        
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['class', 'data-control-name', 'aria-label', 'href', 'src']
+        });
+        
+        // Start initial stability check
+        stabilityCheckId = setTimeout(checkStability, stabilityMs);
+      });
+    }, stabilityPeriod, timeout);
+    
+    if (result) {
+      console.log('✅ Page DOM is stable');
+    } else {
+      console.warn('⚠️ Page stability timeout - DOM may still be changing');
+    }
+    
+    return result;
+    
+  } catch (error) {
+    console.warn('Page stability check failed:', (error as Error).message);
+    return false;
+  }
+}
+
+/**
  * Enhanced LinkedIn page loading validation with comprehensive content detection
  */
 export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'profile' | 'feed' | 'search' = 'profile', timeout: number = 30000): Promise<boolean> {
   const startTime = Date.now();
   console.log(`Waiting for LinkedIn ${expectedPageType} page to load completely...`);
+  
+  // First wait for basic page readiness
+  try {
+    await page.waitForSelector('body', { timeout: 10000 });
+  } catch (error) {
+    console.warn('Body element timeout, continuing...');
+  }
+  
+  // Then wait for page stability to prevent race conditions
+  console.log('Checking for page stability...');
+  const isStable = await waitForPageStability(page, 3000, 15000); // 3 second stability period
+  if (!isStable) {
+    console.warn('Page not fully stable, but proceeding with validation...');
+  }
   
   while (Date.now() - startTime < timeout) {
     try {
@@ -983,17 +1087,91 @@ export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'pro
         let profileData = null;
         
         if (pageType === 'profile') {
-          // Profile page specific checks
-          const profileHeader = document.querySelector('.pv-top-card, .pvs-header, .profile-topcard');
-          const profileActions = document.querySelector('.pv-s-profile-actions, .pvs-profile-actions, .profile-actions');
-          const profileName = document.querySelector('.text-heading-xlarge, .pv-text-details__left-panel h1, .top-card-layout__title')?.textContent?.trim();
+          // Enhanced profile page detection with 2024/2025 LinkedIn DOM structure
+          const profileHeaderSelectors = [
+            // Current LinkedIn selectors (2024/2025)
+            '.profile-topcard', '.profile-topcard-person-entity', 
+            '.pv-top-card', '.pv-top-card-v2', '.pvs-header',
+            // Modern layout selectors
+            '.scaffold-layout-toolbar', '.profile-header',
+            '[data-view-name="profile-topcard"]', '[data-view-name="profile-header"]',
+            // Content-based fallbacks
+            '.artdeco-card .profile', '.profile-photo-edit',
+            // Generic profile containers
+            'section[data-section="topcard"]', 'section[data-section="summary"]'
+          ];
           
-          pageSpecificCheck = !!(profileHeader && profileActions);
+          const profileActionsSelectors = [
+            // Current action button containers
+            '.pv-s-profile-actions', '.pvs-profile-actions', '.profile-actions',
+            '.profile-topcard-actions', '.profile-topcard__actions',
+            // Modern layout actions
+            '.scaffold-layout-toolbar__actions', '.profile-header-actions',
+            '[data-view-name="profile-actions"]', '[data-control-name="hero_cta_container"]',
+            // Button containers
+            '.artdeco-card .profile-actions', '.profile-topcard .actions',
+            // Generic containers with buttons
+            'div:has(button[aria-label*="Connect"])', 'div:has(button[aria-label*="Message"])',
+            'div:has(button[aria-label*="Vernetzen"])', 'div:has(button[aria-label*="Nachricht"])'
+          ];
+          
+          const profileNameSelectors = [
+            // Current name selectors
+            '.text-heading-xlarge', '.pv-text-details__left-panel h1', '.top-card-layout__title',
+            // Modern selectors
+            '.profile-topcard__title', '.profile-topcard-person-entity__name',
+            '.scaffold-layout-toolbar h1', '.profile-header h1',
+            // Fallback patterns
+            '[data-view-name="profile-topcard"] h1', 'h1.profile-name',
+            // Content-based patterns
+            'h1[class*="heading"]', 'h1[class*="title"]', 'h1[class*="name"]'
+          ];
+          
+          // Try multiple selectors for better detection
+          let profileHeader = null;
+          let profileActions = null;
+          let profileName = '';
+          
+          // Find profile header with multiple strategies
+          for (const selector of profileHeaderSelectors) {
+            profileHeader = document.querySelector(selector);
+            if (profileHeader) break;
+          }
+          
+          // Find profile actions with multiple strategies  
+          for (const selector of profileActionsSelectors) {
+            profileActions = document.querySelector(selector);
+            if (profileActions) break;
+          }
+          
+          // Find profile name with multiple strategies
+          for (const selector of profileNameSelectors) {
+            const nameElement = document.querySelector(selector);
+            if (nameElement?.textContent?.trim()) {
+              profileName = nameElement.textContent.trim();
+              break;
+            }
+          }
+          
+          // Additional content-based validation
+          const hasConnectButton = !!document.querySelector('button[aria-label*="Connect"], button[aria-label*="Vernetzen"]');
+          const hasMessageButton = !!document.querySelector('button[aria-label*="Message"], button[aria-label*="Nachricht"]');
+          const hasProfileContent = !!document.querySelector('[data-section], .profile-section, .pvs-list');
+          
+          // More flexible page validation - if we have profile content OR action buttons, consider it valid
+          const hasProfileStructure = !!(profileHeader || profileActions || hasConnectButton || hasMessageButton);
+          const hasProfileData = !!(profileName || hasProfileContent);
+          
+          pageSpecificCheck = hasProfileStructure && hasProfileData;
           profileData = {
             hasProfileHeader: !!profileHeader,
             hasProfileActions: !!profileActions,
             profileName: profileName || '',
-            buttonsFound: document.querySelectorAll('button').length
+            buttonsFound: document.querySelectorAll('button').length,
+            hasConnectButton,
+            hasMessageButton,
+            hasProfileContent,
+            detectionStrategy: profileHeader ? 'header' : profileActions ? 'actions' : hasConnectButton ? 'connect-button' : 'fallback'
           };
         } else if (pageType === 'feed') {
           // Feed page specific checks
@@ -1079,6 +1257,167 @@ export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'pro
   
   console.warn(`⚠️ LinkedIn ${expectedPageType} page loading timeout after ${timeout}ms`);
   return false;
+}
+
+/**
+ * Multi-strategy profile validation with comprehensive fallback approaches
+ */
+export async function validateProfilePage(page: Page): Promise<{ isValid: boolean; strategy: string; confidence: number; details: any }> {
+  console.log('Running multi-strategy profile validation...');
+  
+  try {
+    const validation = await page.evaluate(() => {
+      const strategies = [];
+      
+      // Strategy 1: CSS Selector Based Detection
+      const cssValidation = () => {
+        const profileSelectors = [
+          '.profile-topcard', '.pv-top-card', '.pvs-header',
+          '.scaffold-layout-toolbar', '.profile-header'
+        ];
+        const actionSelectors = [
+          '.pv-s-profile-actions', '.pvs-profile-actions',
+          '.profile-topcard-actions', '.scaffold-layout-toolbar__actions'
+        ];
+        
+        let profileSection = null;
+        let actionSection = null;
+        
+        for (const selector of profileSelectors) {
+          profileSection = document.querySelector(selector);
+          if (profileSection) break;
+        }
+        
+        for (const selector of actionSelectors) {
+          actionSection = document.querySelector(selector);
+          if (actionSection) break;
+        }
+        
+        return {
+          strategy: 'css-selectors',
+          valid: !!(profileSection && actionSection),
+          confidence: profileSection && actionSection ? 0.9 : profileSection ? 0.6 : 0.1,
+          details: { hasProfile: !!profileSection, hasActions: !!actionSection }
+        };
+      };
+      
+      // Strategy 2: Content-Based Detection
+      const contentValidation = () => {
+        const nameSelectors = [
+          'h1', '[class*="heading"]', '[class*="title"]', '[class*="name"]'
+        ];
+        const headlineSelectors = [
+          '[class*="headline"]', '[class*="subtitle"]', '.pv-shared-text-with-see-more'
+        ];
+        
+        let profileName = '';
+        let headline = '';
+        
+        for (const selector of nameSelectors) {
+          const element = document.querySelector(selector);
+          const text = element?.textContent?.trim() || '';
+          if (text && text.length > 2 && text.length < 100) {
+            profileName = text;
+            break;
+          }
+        }
+        
+        for (const selector of headlineSelectors) {
+          const element = document.querySelector(selector);
+          const text = element?.textContent?.trim() || '';
+          if (text && text.length > 10) {
+            headline = text;
+            break;
+          }
+        }
+        
+        return {
+          strategy: 'content-based',
+          valid: !!(profileName && headline),
+          confidence: profileName && headline ? 0.8 : profileName ? 0.5 : 0.1,
+          details: { profileName, headline }
+        };
+      };
+      
+      // Strategy 3: Button-Based Detection
+      const buttonValidation = () => {
+        const connectButtons = document.querySelectorAll('button[aria-label*="Connect"], button[aria-label*="Vernetzen"]');
+        const messageButtons = document.querySelectorAll('button[aria-label*="Message"], button[aria-label*="Nachricht"]');
+        const pendingButtons = document.querySelectorAll('button[aria-label*="Pending"], button[aria-label*="Ausstehend"]');
+        
+        const totalActionButtons = connectButtons.length + messageButtons.length + pendingButtons.length;
+        const hasProfileActions = totalActionButtons > 0;
+        
+        return {
+          strategy: 'button-based',
+          valid: hasProfileActions,
+          confidence: hasProfileActions ? 0.7 : 0.1,
+          details: { 
+            connectButtons: connectButtons.length, 
+            messageButtons: messageButtons.length,
+            pendingButtons: pendingButtons.length
+          }
+        };
+      };
+      
+      // Strategy 4: URL Pattern + Basic Structure
+      const urlValidation = () => {
+        const isProfileURL = window.location.pathname.includes('/in/');
+        const hasBasicStructure = !!document.querySelector('main') && document.querySelectorAll('button').length > 5;
+        const hasLinkedInAssets = document.querySelectorAll('[src*="licdn"], [href*="licdn"]').length > 10;
+        
+        return {
+          strategy: 'url-structure',
+          valid: isProfileURL && hasBasicStructure && hasLinkedInAssets,
+          confidence: isProfileURL && hasBasicStructure ? 0.6 : 0.2,
+          details: { isProfileURL, hasBasicStructure, hasLinkedInAssets }
+        };
+      };
+      
+      // Run all strategies
+      strategies.push(cssValidation());
+      strategies.push(contentValidation());
+      strategies.push(buttonValidation());
+      strategies.push(urlValidation());
+      
+      // Find best strategy
+      const validStrategies = strategies.filter(s => s.valid);
+      const bestStrategy = strategies.reduce((best, current) => 
+        current.confidence > best.confidence ? current : best
+      );
+      
+      return {
+        strategies,
+        bestStrategy,
+        overallValid: validStrategies.length >= 2 || bestStrategy.confidence >= 0.7,
+        confidence: Math.max(...strategies.map(s => s.confidence)),
+        validCount: validStrategies.length
+      };
+    });
+    
+    console.log('Profile validation results:', {
+      isValid: validation.overallValid,
+      strategy: validation.bestStrategy.strategy,
+      confidence: validation.confidence,
+      validStrategies: validation.validCount
+    });
+    
+    return {
+      isValid: validation.overallValid,
+      strategy: validation.bestStrategy.strategy,
+      confidence: validation.confidence,
+      details: validation
+    };
+    
+  } catch (error) {
+    console.error('Profile validation failed:', (error as Error).message);
+    return {
+      isValid: false,
+      strategy: 'error',
+      confidence: 0,
+      details: { error: (error as Error).message }
+    };
+  }
 }
 
 /**

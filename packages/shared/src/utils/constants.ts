@@ -54,50 +54,66 @@ export const DEFAULT_JOB_OPTIONS = {
 } as const;
 
 export const LINKEDIN_SELECTORS = {
-  // Enhanced Connect Button selectors with multiple fallbacks
+  // Comprehensive Connect Button selectors with enhanced German language support
   CONNECT_BUTTON: [
-    // Primary patterns (2024-2025)
-    'button[aria-label*="Connect"], button[aria-label*="Vernetzen"]',
+    // Primary patterns (2024-2025) - English and German
+    'button[aria-label*="Connect"], button[aria-label*="Vernetzen"], button[aria-label*="Verbinden"]',
     'button[data-control-name="connect"]',
     'button[data-test-id*="connect"]',
-    // Profile action buttons area
-    '.pv-s-profile-actions button[aria-label*="Connect"]',
-    '.pvs-profile-actions button[aria-label*="Connect"]',
-    // Text-based fallbacks  
-    'button:has-text("Connect"), button:has-text("Vernetzen")',
+    
+    // Profile action buttons area - both languages
+    '.pv-s-profile-actions button[aria-label*="Connect"], .pv-s-profile-actions button[aria-label*="Vernetzen"]',
+    '.pvs-profile-actions button[aria-label*="Connect"], .pvs-profile-actions button[aria-label*="Vernetzen"]',
+    '.profile-actions button[aria-label*="Connect"], .profile-actions button[aria-label*="Vernetzen"]',
+    
+    // Text-based fallbacks with comprehensive German variations
+    'button:has-text("Connect"), button:has-text("Vernetzen"), button:has-text("Verbinden")',
+    'button:contains("Connect"), button:contains("Vernetzen"), button:contains("Verbinden")',
+    
     // Class-based patterns
-    'button.artdeco-button--primary[aria-label*="Connect"]',
-    'button.connect-button',
-    // XPath fallback
-    '//button[contains(@aria-label, "Connect") or contains(text(), "Connect")]'
+    'button.artdeco-button--primary[aria-label*="Connect"], button.artdeco-button--primary[aria-label*="Vernetzen"]',
+    'button.connect-button, button.vernetzen-button',
+    
+    // Generic button search with text content (broader fallback)
+    'button[type="button"]:contains("Connect")',
+    'button[type="button"]:contains("Vernetzen")',
+    'button[type="button"]:contains("Verbinden")',
+    
+    // Attribute contains searches (more flexible)
+    'button[aria-label]:contains("Connect")',
+    'button[aria-label]:contains("Vernetzen")',
+    'button[title*="Connect"], button[title*="Vernetzen"]'
   ].join(', '),
   
-  // Enhanced Note Button selectors
+  // Enhanced Note Button selectors with comprehensive German support
   NOTE_BUTTON: [
-    'button[aria-label*="Add a note"], button[aria-label*="Notiz"]',
+    'button[aria-label*="Add a note"], button[aria-label*="Notiz"], button[aria-label*="Nachricht hinzufügen"]',
     'button[data-control-name="add-note"]',
     'button[data-test-id*="note"]',
     '.send-invite__add-note-button',
-    'button:has-text("Add a note"), button:has-text("Notiz")'
+    'button:has-text("Add a note"), button:has-text("Notiz"), button:has-text("Nachricht hinzufügen")',
+    'button:contains("Add a note"), button:contains("Notiz")'
   ].join(', '),
   
-  // Enhanced Send Button selectors
+  // Enhanced Send Button selectors with comprehensive German support
   SEND_BUTTON: [
-    'button[aria-label*="Send invite"], button[aria-label*="Einladung senden"]',
-    'button[data-control-name="send.invite"]',
+    'button[aria-label*="Send invite"], button[aria-label*="Einladung senden"], button[aria-label*="Senden"]',
+    'button[data-control-name="send.invite"], button[data-control-name="send"]',
     'button[data-test-id*="send"]',
-    '.send-invite__actions button[aria-label*="Send"]',
-    'button:has-text("Send invite"), button:has-text("Einladung")'
+    '.send-invite__actions button[aria-label*="Send"], .send-invite__actions button[aria-label*="Senden"]',
+    'button:has-text("Send invite"), button:has-text("Einladung"), button:has-text("Senden")',
+    'button:contains("Send"), button:contains("Senden"), button:contains("Einladung")'
   ].join(', '),
   
-  // Enhanced Message Button selectors
+  // Enhanced Message Button selectors with comprehensive German support
   MESSAGE_BUTTON: [
-    'button[aria-label*="Message"], button[aria-label*="Nachricht"]',
+    'button[aria-label*="Message"], button[aria-label*="Nachricht"], button[aria-label*="Nachricht senden"]',
     'button[data-control-name="message"]',
     'button[data-test-id*="message"]',
-    '.pv-s-profile-actions button[aria-label*="Message"]',
-    '.pvs-profile-actions button[aria-label*="Message"]',
-    'button:has-text("Message"), button:has-text("Nachricht")'
+    '.pv-s-profile-actions button[aria-label*="Message"], .pv-s-profile-actions button[aria-label*="Nachricht"]',
+    '.pvs-profile-actions button[aria-label*="Message"], .pvs-profile-actions button[aria-label*="Nachricht"]',
+    'button:has-text("Message"), button:has-text("Nachricht")',
+    'button:contains("Message"), button:contains("Nachricht")'
   ].join(', '),
   
   // Enhanced Message Textarea selectors
