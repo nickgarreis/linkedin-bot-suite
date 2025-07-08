@@ -22,6 +22,87 @@ export async function enforceRequestSpacing(): Promise<void> {
 }
 
 /**
+ * Monitor page stability and detect degradation (BIGPIPE stuck, element loss)
+ */
+export async function monitorPageStability(
+  page: Page, 
+  options: { 
+    maxDegradationChecks?: number, 
+    degradationThreshold?: number,
+    checkInterval?: number 
+  } = {}
+): Promise<{ isStable: boolean, degradationDetected: boolean, elementCount: number }> {
+  const { maxDegradationChecks = 3, degradationThreshold = 0.5, checkInterval = 2000 } = options;
+  
+  let initialElementCount = 0;
+  let lastElementCount = 0;
+  
+  try {
+    // Get baseline element count
+    const baseline = await safeEvaluate(page, () => ({
+      totalElements: document.querySelectorAll('*').length,
+      totalButtons: document.querySelectorAll('button').length,
+      isBigpipeStuck: document.body?.classList.contains('render-mode-BIGPIPE') && 
+                     document.readyState === 'loading'
+    }));
+    
+    if (!baseline || typeof baseline !== 'object') {
+      return { isStable: false, degradationDetected: true, elementCount: 0 };
+    }
+    
+    initialElementCount = (baseline as any).totalElements || 0;
+    lastElementCount = initialElementCount;
+    
+    console.log(`📊 Page stability baseline: ${initialElementCount} elements, BIGPIPE stuck: ${(baseline as any).isBigpipeStuck}`);
+    
+    // Monitor for degradation over time
+    for (let check = 0; check < maxDegradationChecks; check++) {
+      await new Promise(resolve => setTimeout(resolve, checkInterval));
+      
+      const current = await safeEvaluate(page, () => ({
+        totalElements: document.querySelectorAll('*').length,
+        totalButtons: document.querySelectorAll('button').length,
+        readyState: document.readyState,
+        isBigpipeStuck: document.body?.classList.contains('render-mode-BIGPIPE') && 
+                       document.readyState === 'loading',
+        hasGlobalNav: !!document.querySelector('.global-nav'),
+        hasMainContent: !!document.querySelector('main, #main')
+      }));
+      
+      if (!current || typeof current !== 'object') {
+        console.warn(`⚠️ Page stability check ${check + 1} failed - page may be degrading`);
+        return { isStable: false, degradationDetected: true, elementCount: lastElementCount };
+      }
+      
+      const currentCount = (current as any).totalElements || 0;
+      const degradationRatio = currentCount / initialElementCount;
+      
+      console.log(`📊 Stability check ${check + 1}: ${currentCount} elements (${Math.round(degradationRatio * 100)}% of baseline)`);
+      
+      // Detect significant degradation
+      if (degradationRatio < degradationThreshold) {
+        console.error(`❌ Page degradation detected: ${currentCount}/${initialElementCount} elements (${Math.round(degradationRatio * 100)}%)`);
+        return { isStable: false, degradationDetected: true, elementCount: currentCount };
+      }
+      
+      // Detect BIGPIPE stuck state
+      if ((current as any).isBigpipeStuck) {
+        console.warn(`⚠️ BIGPIPE stuck detected on check ${check + 1}`);
+      }
+      
+      lastElementCount = currentCount;
+    }
+    
+    console.log(`✅ Page stability confirmed: ${lastElementCount} elements maintained`);
+    return { isStable: true, degradationDetected: false, elementCount: lastElementCount };
+    
+  } catch (error) {
+    console.error('Page stability monitoring failed:', error);
+    return { isStable: false, degradationDetected: true, elementCount: lastElementCount };
+  }
+}
+
+/**
  * Safe page evaluation that handles frame detachment
  */
 export async function safeEvaluate<T>(
@@ -57,6 +138,42 @@ export async function safeEvaluate<T>(
       return {} as T;
     }
     throw error;
+  }
+}
+
+/**
+ * Aggressive memory cleanup for faster execution and reduced footprint
+ */
+export async function optimizeMemoryUsage(page: Page): Promise<void> {
+  try {
+    // Clear all caches and storage
+    await safeClearStorage(page);
+    
+    // Aggressive JavaScript garbage collection
+    await safeEvaluate(page, () => {
+      // Force garbage collection if available
+      if ((window as any).gc) {
+        (window as any).gc();
+      }
+      
+      // Clear DOM caches
+      const clearableElements = document.querySelectorAll('[style*="background-image"], img[src^="data:"]');
+      clearableElements.forEach(el => {
+        if (el instanceof HTMLElement) {
+          el.style.backgroundImage = '';
+        }
+        if (el instanceof HTMLImageElement && el.src.startsWith('data:')) {
+          el.src = '';
+        }
+      });
+      
+      // Clear any event listeners that might be holding references
+      return true;
+    });
+    
+    console.log('✅ Memory optimization completed');
+  } catch (error) {
+    console.warn('Memory optimization failed:', error);
   }
 }
 
@@ -607,11 +724,29 @@ export function humanDelay(baseMs: number, variationPercent: number = 50): numbe
   const variation = adjustedBase * (variationAdjustment / 100);
   const randomOffset = (Math.random() - 0.5) * 2 * variation;
   
-  // Ensure minimum delay but allow longer delays during off-hours
-  const minDelay = activityPattern.isActiveHour ? 100 : 200;
+  // Reduced minimum delays for faster execution
+  const minDelay = activityPattern.isActiveHour ? 50 : 100; // Reduced from 100/200 to 50/100
   const result = Math.max(minDelay, Math.floor(adjustedBase + randomOffset));
   
   return result;
+}
+
+/**
+ * Enhanced human delay with exponential variation for bot detection evasion
+ */
+export function smartHumanDelay(baseMs: number, context: 'fast' | 'normal' | 'careful' = 'normal'): number {
+  const contextMultipliers = {
+    fast: 0.3,    // 30% of base time for degraded pages
+    normal: 1.0,  // Normal timing
+    careful: 1.8  // 180% for sensitive operations
+  };
+  
+  const multiplier = contextMultipliers[context];
+  const exponentialVariation = Math.random() ** 2; // Bias toward faster times
+  const adjustedBase = baseMs * multiplier;
+  const finalDelay = Math.round(adjustedBase * (0.5 + exponentialVariation));
+  
+  return Math.max(25, finalDelay); // Ultra-fast minimum for speed
 }
 
 /**

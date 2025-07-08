@@ -87,7 +87,9 @@ async function initLinkedInContext(proxy) {
     }
     const pptr = (0, puppeteer_extra_1.addExtra)(puppeteer_1.default);
     pptr.use((0, puppeteer_extra_plugin_stealth_1.default)());
-    const userDataDir = `/tmp/chrome-user-data-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    // Enhanced session variation with more randomness
+    const sessionId = `${Date.now()}-${Math.random().toString(36).substr(2, 12)}-${Math.floor(Math.random() * 10000)}`;
+    const userDataDir = `/tmp/chrome-user-data-${sessionId}`;
     // Updated user agent rotation with current Chrome versions (Jan 2025)
     const userAgents = [
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36', // Your exact user agent
@@ -98,11 +100,26 @@ async function initLinkedInContext(proxy) {
     ];
     const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
     console.log('Using user agent:', randomUserAgent);
-    // Enhanced Chrome configuration optimized for LinkedIn compatibility and bot detection evasion
+    // Advanced Chrome configuration with session randomization for bot detection evasion
+    const randomViewport = {
+        width: 1920 + Math.floor(Math.random() * 200), // 1920-2120px width variation
+        height: 1080 + Math.floor(Math.random() * 200) // 1080-1280px height variation
+    };
+    // Randomize some browser arguments for session variation
+    const randomArgs = [
+        // Memory and performance randomization
+        `--max_old_space_size=${4096 + Math.floor(Math.random() * 2048)}`, // 4-6GB variation
+        `--memory-pressure-threshold=${100 + Math.floor(Math.random() * 50)}`, // Memory threshold variation
+        // Timing randomization
+        `--renderer-process-limit=${2 + Math.floor(Math.random() * 3)}`, // 2-4 renderer processes
+        // Feature randomization (some enabled, some disabled randomly)
+        ...(Math.random() > 0.5 ? ['--enable-features=WebRTCPipeWireCapturer'] : []),
+        ...(Math.random() > 0.5 ? ['--disable-features=AutoplayIgnoreWebAudio'] : [])
+    ];
     const launchOptions = {
         headless: 'new',
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
-        protocolTimeout: 300000, // 5 minutes timeout
+        protocolTimeout: 180000, // Reduced from 5min to 3min for faster failures
         args: [
             // Essential container security
             '--no-sandbox',
@@ -137,15 +154,18 @@ async function initLinkedInContext(proxy) {
             '--disable-background-timer-throttling',
             '--disable-renderer-backgrounding',
             '--disable-backgrounding-occluded-windows',
-            // Bot detection evasion - more human-like browser
-            '--window-size=1920,1080', // Increased for more human-like resolution
+            // Enhanced bot detection evasion with randomization
+            `--window-size=${randomViewport.width},${randomViewport.height}`,
             '--start-maximized',
             '--disable-extensions',
             '--disable-plugins',
             '--disable-features=IsolateOrigins,site-per-process', // Stability for dynamic content
+            // Add randomized arguments for session variation
+            ...randomArgs,
             ...(proxy ? [`--proxy-server=${proxy}`] : [])
         ]
     };
+    console.log(`🎲 Session randomization: ${randomViewport.width}x${randomViewport.height} viewport, ${randomArgs.length} random args`);
     let browser = null;
     let page = null;
     try {
@@ -172,9 +192,9 @@ async function initLinkedInContext(proxy) {
         catch (userAgentError) {
             console.warn('⚠️ User agent configuration failed, using browser default:', userAgentError.message);
         }
-        // Set conservative timeouts for container stability
-        page.setDefaultNavigationTimeout(60000); // Increased back to 60s for stability
-        page.setDefaultTimeout(60000); // Increased back to 60s for stability
+        // Set aggressive timeouts for fast execution
+        page.setDefaultNavigationTimeout(25000); // Reduced from 60s to 25s for speed
+        page.setDefaultTimeout(25000); // Reduced from 60s to 25s for speed
         // REMOVED: Viewport configuration completely to prevent Chrome session closure
         // Chrome will use default viewport settings
         console.log('✅ Using default Chrome viewport (no custom configuration)');
@@ -183,7 +203,7 @@ async function initLinkedInContext(proxy) {
         try {
             await page.goto('data:text/html,<html><head><title>Initializing</title></head><body></body></html>', {
                 waitUntil: 'domcontentloaded',
-                timeout: 30000
+                timeout: 15000 // Reduced from 30s to 15s
             });
         }
         catch (initError) {

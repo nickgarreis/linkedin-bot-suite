@@ -1,6 +1,6 @@
 import { Page } from 'puppeteer';
 import { LINKEDIN_SELECTORS } from '@linkedin-bot-suite/shared';
-import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady, linkedInTyping, getActivityPattern, resetSessionState, waitForLinkedInPageLoad, waitForProfilePageReady, analyzePageStructure, validateProfilePage, waitForPageStability } from '../utils/browserHealth';
+import { safeElementInteraction, verifyPageStability, humanDelay, simulateHumanBehavior, enforceRequestSpacing, waitForButtonWithMultipleSelectors, waitForLinkedInPageReady, linkedInTyping, getActivityPattern, resetSessionState, waitForLinkedInPageLoad, waitForProfilePageReady, analyzePageStructure, validateProfilePage, waitForPageStability, monitorPageStability, optimizeMemoryUsage, smartHumanDelay } from '../utils/browserHealth';
 import { sendMessage } from './message';
 
 export async function sendInvitation(
@@ -22,8 +22,8 @@ export async function sendInvitation(
   // Enforce request spacing to prevent rate limiting
   await enforceRequestSpacing();
   
-  // Add human-like delay before navigation
-  const navigationDelay = humanDelay(2000, 60); // 800ms-3200ms variation
+  // Smart navigation delay with exponential bias toward speed
+  const navigationDelay = smartHumanDelay(800, 'fast'); // Exponentially biased toward faster execution
   await new Promise(resolve => setTimeout(resolve, navigationDelay));
   
   // Use more flexible navigation strategy with retry logic
@@ -87,8 +87,8 @@ export async function sendInvitation(
         validationAttempts++;
         console.log(`Page validation attempt ${validationAttempts}/${maxValidationAttempts}`);
         
-        // Step 1: Basic page loading with reduced timeout
-        const pageLoaded = await waitForLinkedInPageLoad(page, 'profile', 15000);
+        // Step 1: Basic page loading with aggressive timeout for speed
+        const pageLoaded = await waitForLinkedInPageLoad(page, 'profile', 8000); // Reduced from 15s to 8s
         if (!pageLoaded) {
           if (validationAttempts >= maxValidationAttempts) {
             console.log('Basic page loading failed, analyzing page structure...');
@@ -96,7 +96,7 @@ export async function sendInvitation(
             throw new Error('LinkedIn profile page failed to load properly after multiple attempts');
           }
           console.warn('Page loading failed, retrying...');
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Reduced retry wait from 2s to 1s
           continue;
         }
         
@@ -116,7 +116,7 @@ export async function sendInvitation(
             throw new Error(`Profile page validation failed - very low confidence (${profileValidation.confidence}) after ${validationAttempts} attempts`);
           } else if (profileValidation.confidence < 0.2) {
             console.warn('Very low confidence validation, retrying...');
-            await new Promise(resolve => setTimeout(resolve, 3000)); // Longer wait for page to load
+            await new Promise(resolve => setTimeout(resolve, 1500)); // Reduced from 3s to 1.5s
             continue;
           } else if (profileValidation.confidence < 0.4 && validationAttempts >= maxValidationAttempts) {
             // Medium confidence - might be a profile page, try to proceed with caution
@@ -126,7 +126,7 @@ export async function sendInvitation(
             // Continue with execution but add extra validation later
           } else if (profileValidation.confidence < 0.4) {
             console.warn('Low confidence validation, retrying once more...');
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Reduced from 2s to 1s
             continue;
           } else {
             console.warn(`⚠️ Medium confidence (${profileValidation.confidence}) but proceeding...`);
@@ -152,9 +152,21 @@ export async function sendInvitation(
       }
     }
 
-    // Simulate human behavior on the profile page
-    console.log('Simulating human behavior...');
-    await simulateHumanBehavior(page);
+    // Fast-track page stability monitoring instead of slow human behavior simulation
+    console.log('Monitoring page stability for degradation...');
+    const stabilityResult = await monitorPageStability(page, { 
+      maxDegradationChecks: 2, // Reduced from 3 for speed
+      degradationThreshold: 0.6, // Allow 40% degradation before flagging
+      checkInterval: 1000 // Reduced from 2s to 1s
+    });
+    
+    if (stabilityResult.degradationDetected) {
+      console.warn(`⚠️ Page degradation detected (${stabilityResult.elementCount} elements remaining), proceeding with caution...`);
+      // Optimize memory to help with degraded pages
+      await optimizeMemoryUsage(page);
+    } else {
+      console.log('✅ Page stability confirmed, proceeding with full confidence');
+    }
     
     // Smart connection state detection with auto-fallback to messaging
     console.log('Checking connection state for smart action selection...');
@@ -163,7 +175,7 @@ export async function sendInvitation(
     try {
       const messageSelectors = LINKEDIN_SELECTORS.MESSAGE_BUTTON.split(', ');
       await waitForButtonWithMultipleSelectors(page, messageSelectors, { 
-        timeout: 3000, 
+        timeout: stabilityResult.degradationDetected ? 1500 : 2000, // Reduced timeout if degraded
         visible: true 
       });
       isAlreadyConnected = true;
@@ -205,7 +217,7 @@ export async function sendInvitation(
         'button:has-text("Pending"), button:has-text("Ausstehend")'
       ];
       await waitForButtonWithMultipleSelectors(page, pendingSelectors, { 
-        timeout: 3000, 
+        timeout: stabilityResult.degradationDetected ? 1000 : 2000, // Reduced timeout if degraded
         visible: true 
       });
       throw new Error('Invitation already pending - cannot send duplicate invitation');
@@ -230,16 +242,16 @@ export async function sendInvitation(
     
     console.log(`Found ${preSearchAnalysis.buttonAnalysis.totalButtons} total buttons, ${preSearchAnalysis.buttonAnalysis.connectButtons} Connect buttons, ${preSearchAnalysis.buttonAnalysis.messageButtons} Message buttons`);
     
-    // Stage 2: Wait for buttons to be rendered and stable
-    console.log('Stage 2: Waiting for buttons to be stable...');
-    await new Promise(resolve => setTimeout(resolve, humanDelay(2000, 50)));
+    // Stage 2: Reduced wait for faster execution
+    console.log('Stage 2: Brief wait for button stability...');
+    await new Promise(resolve => setTimeout(resolve, stabilityResult.degradationDetected ? 500 : 1000)); // Reduced wait
     
     // Stage 3: Enhanced Connect button search with multiple strategies
     console.log('Stage 3: Searching for Connect button with enhanced patterns...');
     try {
       const connectSelectors = LINKEDIN_SELECTORS.CONNECT_BUTTON.split(', ');
       connectButton = await waitForButtonWithMultipleSelectors(page, connectSelectors, {
-        timeout: 20000, // Increased timeout
+        timeout: stabilityResult.degradationDetected ? 8000 : 12000, // Reduced from 20s, adaptive based on page state
         visible: true,
         enabled: true
       });
