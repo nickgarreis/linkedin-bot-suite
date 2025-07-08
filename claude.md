@@ -128,8 +128,8 @@ pnpm add -D <package> -w
 
 ### Cookie Management Environment Variables
 - `INTERNAL_API_KEY` - Secure random string for internal cookie management endpoints
-- `RENDER_API_KEY` - Render.com API key for automatic redeployment (optional)
-- `RENDER_SERVICE_ID` - Worker service ID on Render.com for redeployment (optional)
+- `RENDER_API_KEY` - Render.com API key for automatic redeployment and CLI access
+- `RENDER_SERVICE_ID` - Worker service ID on Render.com for redeployment (srv-d1m1udq4d50c738d0630)
 
 ### Worker Environment Variables
 - `WORKER_CONCURRENCY` - Number of concurrent jobs (default: 2)
@@ -167,10 +167,19 @@ Enhanced schema with workflow tracking:
 - `GET /jobs/workflow/{workflowRunId}/status` - Get workflow status
 - `DELETE /jobs/{jobId}` - Cancel/delete job
 
+### Internal Management Endpoints
+- `POST /internal/update-cookies` - Update LinkedIn cookies and trigger worker redeployment
+- `GET /internal/health` - Internal API health check
+
 ### Authentication
 All endpoints require API key authentication:
 ```
 x-api-key: your-api-key-here
+```
+
+Internal endpoints require additional authentication:
+```
+x-internal-key: your-internal-api-key-here
 ```
 
 ## Adding New LinkedIn Actions
@@ -185,9 +194,15 @@ x-api-key: your-api-key-here
 ## Deployment
 
 ### Render.com Deployment
-- **API Server**: Node.js web service using `api-server/render.yaml`
-- **Worker**: Docker background service using root `Dockerfile`
-- **Redis**: Managed Redis service linked to both API and Worker
+- **API Server**: Node.js web service using `api-server/render.yaml` (srv-d1lv5tripnbc73a6n6e0)
+- **Worker**: Docker background service using root `Dockerfile` (srv-d1m1udq4d50c738d0630)
+- **Redis**: Managed Redis service linked to both API and Worker (red-d1lv30ndiees7387142g)
+
+### Render CLI & API Access
+- **CLI**: Authenticated as Nick Garreis (nickgarreis24@gmail.com)
+- **API Key**: Configured for programmatic access to Render services
+- **Service Management**: Use `render services list`, `render logs`, `render restart`
+- **Environment Variables**: Set via Render API for automatic cookie management
 
 ### Docker Configuration
 **Worker Service Requirements:**
@@ -251,3 +266,23 @@ Additional environment variables for Docker Worker:
 - **Concurrent Jobs**: Prevents SingletonLock errors by using unique user data directories
 - **Health Monitoring**: Comprehensive browser and page health validation
 - **Error Recovery**: Browser disconnect handlers and timeout-based cleanup mechanisms
+
+## Render Service Management
+
+### Current Service IDs
+- **API Server**: `srv-d1lv5tripnbc73a6n6e0` (linkedin-bot-api)
+- **Worker**: `srv-d1m1udq4d50c738d0630` (linkedin-bot-worker)
+- **Redis**: `red-d1lv30ndiees7387142g` (linkedin-bot-redis)
+
+### Cookie Management Workflow
+1. **Cookie Update**: POST to `/internal/update-cookies` with LinkedIn cookies
+2. **Validation**: Cookies are validated against LinkedIn's feed endpoint
+3. **Environment Update**: `LINKEDIN_COOKIES_JSON` updated via Render API
+4. **Worker Redeployment**: Automatic trigger of worker service restart
+5. **Health Monitoring**: Nightly cookie health checks at 03:00 UTC
+
+### Render API Integration
+- **Authentication**: Uses `RENDER_API_KEY` for API access
+- **Target Service**: `RENDER_SERVICE_ID` points to worker service
+- **Security**: `INTERNAL_API_KEY` protects internal endpoints
+- **Automatic Redeployment**: Updates cookies and restarts worker in one operation
