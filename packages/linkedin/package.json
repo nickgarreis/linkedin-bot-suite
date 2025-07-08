@@ -14,6 +14,8 @@
     "@linkedin-bot-suite/shared": "workspace:*"
   },
   "devDependencies": {
-    "@types/puppeteer": "^7.0.4"
+    "@types/puppeteer": "^7.0.4",
+    "@types/node": "^24.0.10",
+    "typescript": "^5.8.3"
   }
 }

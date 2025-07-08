@@ -74,40 +74,66 @@ export async function sendInvitation(
   }
 
   try {
-    // Enhanced LinkedIn page loading validation with stability protection
-    console.log('Validating LinkedIn page loading with comprehensive checks...');
+    // Enhanced page loading with context destruction recovery
+    console.log('Validating LinkedIn page loading with recovery mechanisms...');
     
-    // Step 1: Basic page loading
-    const pageLoaded = await waitForLinkedInPageLoad(page, 'profile', 35000);
-    if (!pageLoaded) {
-      console.log('Basic page loading failed, analyzing page structure...');
-      await analyzePageStructure(page);
-      throw new Error('LinkedIn profile page failed to load properly');
-    }
+    let validationAttempts = 0;
+    const maxValidationAttempts = 2;
+    let pageValidated = false;
     
-    // Step 2: Multi-strategy profile validation
-    console.log('Running multi-strategy profile validation...');
-    const profileValidation = await validateProfilePage(page);
-    
-    if (!profileValidation.isValid) {
-      console.warn(`Profile validation failed with ${profileValidation.strategy} strategy (confidence: ${profileValidation.confidence})`);
-      console.log('Running final page analysis before failing...');
-      await analyzePageStructure(page);
-      
-      if (profileValidation.confidence < 0.3) {
-        throw new Error(`Profile page validation failed - insufficient confidence (${profileValidation.confidence}) using ${profileValidation.strategy} strategy`);
-      } else {
-        console.warn('Low confidence but proceeding with caution...');
+    while (!pageValidated && validationAttempts < maxValidationAttempts) {
+      try {
+        validationAttempts++;
+        console.log(`Page validation attempt ${validationAttempts}/${maxValidationAttempts}`);
+        
+        // Step 1: Basic page loading with reduced timeout
+        const pageLoaded = await waitForLinkedInPageLoad(page, 'profile', 15000);
+        if (!pageLoaded) {
+          if (validationAttempts >= maxValidationAttempts) {
+            console.log('Basic page loading failed, analyzing page structure...');
+            await analyzePageStructure(page);
+            throw new Error('LinkedIn profile page failed to load properly after multiple attempts');
+          }
+          console.warn('Page loading failed, retrying...');
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          continue;
+        }
+        
+        // Step 2: Simplified profile validation with recovery
+        console.log('Running simplified profile validation...');
+        const profileValidation = await validateProfilePage(page);
+        
+        if (!profileValidation.isValid) {
+          if (profileValidation.confidence < 0.3 && validationAttempts >= maxValidationAttempts) {
+            console.log('Running final page analysis before failing...');
+            await analyzePageStructure(page);
+            throw new Error(`Profile page validation failed - insufficient confidence (${profileValidation.confidence}) after ${validationAttempts} attempts`);
+          } else if (profileValidation.confidence < 0.3) {
+            console.warn('Low confidence validation, retrying...');
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            continue;
+          } else {
+            console.warn(`Low confidence (${profileValidation.confidence}) but proceeding...`);
+          }
+        } else {
+          console.log(`✅ Profile validated successfully (confidence: ${profileValidation.confidence})`);
+        }
+        
+        pageValidated = true;
+        
+      } catch (error) {
+        const errorMessage = (error as Error).message;
+        if (errorMessage.includes('Execution context was destroyed') || 
+            errorMessage.includes('Target closed') ||
+            errorMessage.includes('Session closed')) {
+          console.warn(`Context destruction detected on attempt ${validationAttempts}, retrying...`);
+          if (validationAttempts < maxValidationAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+          }
+        }
+        throw error;
       }
-    } else {
-      console.log(`✅ Profile validated successfully using ${profileValidation.strategy} strategy (confidence: ${profileValidation.confidence})`);
-    }
-    
-    // Step 3: Additional page stability check to prevent state regression
-    console.log('Performing final stability check to prevent state regression...');
-    const finalStability = await waitForPageStability(page, 2000, 10000);
-    if (!finalStability) {
-      console.warn('Final stability check failed, but proceeding with validated profile...');
     }
 
     // Simulate human behavior on the profile page

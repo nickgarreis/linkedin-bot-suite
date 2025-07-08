@@ -958,88 +958,89 @@ export async function linkedInTyping(page: Page, text: string, context: 'message
 }
 
 /**
- * Wait for page DOM to stabilize using MutationObserver
+ * Wait for page DOM to stabilize using safer polling approach
  */
-export async function waitForPageStability(page: Page, stabilityPeriod: number = 2000, timeout: number = 20000): Promise<boolean> {
-  console.log(`Waiting for page to be stable for ${stabilityPeriod}ms...`);
+export async function waitForPageStability(page: Page, stabilityPeriod: number = 1000, timeout: number = 10000): Promise<boolean> {
+  console.log(`Checking page stability with ${stabilityPeriod}ms checks over ${timeout}ms...`);
+  
+  const startTime = Date.now();
+  let lastElementCount = 0;
+  let lastButtonCount = 0;
+  let stableChecksPassed = 0;
+  const checksNeeded = Math.max(2, Math.floor(stabilityPeriod / 500)); // At least 2 checks
   
   try {
-    const result = await page.evaluate((stabilityMs, timeoutMs) => {
-      return new Promise<boolean>((resolve) => {
-        let lastChangeTime = Date.now();
-        let timeoutId: NodeJS.Timeout;
-        let observer: MutationObserver;
-        let stabilityCheckId: NodeJS.Timeout;
-        
-        const cleanup = () => {
-          if (observer) observer.disconnect();
-          if (timeoutId) clearTimeout(timeoutId);
-          if (stabilityCheckId) clearTimeout(stabilityCheckId);
-        };
-        
-        const checkStability = () => {
-          const now = Date.now();
-          const timeSinceLastChange = now - lastChangeTime;
+    while (Date.now() - startTime < timeout) {
+      // Quick, safe evaluation with timeout protection
+      const currentState = await Promise.race([
+        safeEvaluate(page, () => {
+          const elements = document.querySelectorAll('*').length;
+          const buttons = document.querySelectorAll('button').length;
+          const readyState = document.readyState;
+          const hasErrors = !!document.querySelector('.error-page, .not-found-page');
           
-          if (timeSinceLastChange >= stabilityMs) {
-            cleanup();
-            resolve(true);
-          } else {
-            // Check again after remaining time
-            const remainingTime = stabilityMs - timeSinceLastChange;
-            stabilityCheckId = setTimeout(checkStability, remainingTime);
-          }
-        };
+          return {
+            elementCount: elements,
+            buttonCount: buttons,
+            readyState,
+            hasErrors,
+            bodyClasses: document.body?.className || ''
+          };
+        }, 2000), // 2 second max evaluation time
+        new Promise<any>((_, reject) => 
+          setTimeout(() => reject(new Error('Stability check timeout')), 3000)
+        )
+      ]);
+      
+      if (!currentState || typeof currentState !== 'object') {
+        console.warn('⚠️ Page state evaluation failed, considering unstable');
+        return false;
+      }
+      
+      // Check for errors first
+      if (currentState.hasErrors) {
+        console.warn('⚠️ Error page detected during stability check');
+        return false;
+      }
+      
+      // Check for BIGPIPE completion (LinkedIn-specific)
+      const isBigpipeComplete = !currentState.bodyClasses.includes('render-mode-BIGPIPE');
+      
+      // Compare with previous state
+      const isStableNow = (
+        currentState.readyState === 'complete' && 
+        currentState.elementCount > 100 && // Minimum content threshold
+        currentState.buttonCount > 0 && // Must have buttons
+        Math.abs(currentState.elementCount - lastElementCount) <= 5 && // Small changes ok
+        Math.abs(currentState.buttonCount - lastButtonCount) <= 2 && // Button changes minimal
+        isBigpipeComplete // LinkedIn BIGPIPE done
+      );
+      
+      if (isStableNow) {
+        stableChecksPassed++;
+        console.log(`✓ Stability check ${stableChecksPassed}/${checksNeeded} passed (${currentState.elementCount} elements, ${currentState.buttonCount} buttons)`);
         
-        // Set overall timeout
-        timeoutId = setTimeout(() => {
-          cleanup();
-          resolve(false);
-        }, timeoutMs);
-        
-        // Watch for DOM changes
-        observer = new MutationObserver((mutations) => {
-          // Filter out trivial changes (class changes, style changes)
-          const significantChanges = mutations.filter(mutation => {
-            if (mutation.type === 'childList') {
-              return mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0;
-            }
-            if (mutation.type === 'attributes') {
-              // Only count certain attribute changes as significant
-              const significantAttrs = ['data-control-name', 'aria-label', 'href', 'src'];
-              return significantAttrs.includes(mutation.attributeName || '');
-            }
-            return false;
-          });
-          
-          if (significantChanges.length > 0) {
-            lastChangeTime = Date.now();
-            
-            // Reset stability check
-            if (stabilityCheckId) clearTimeout(stabilityCheckId);
-            stabilityCheckId = setTimeout(checkStability, stabilityMs);
-          }
-        });
-        
-        observer.observe(document.body, {
-          childList: true,
-          subtree: true,
-          attributes: true,
-          attributeFilter: ['class', 'data-control-name', 'aria-label', 'href', 'src']
-        });
-        
-        // Start initial stability check
-        stabilityCheckId = setTimeout(checkStability, stabilityMs);
-      });
-    }, stabilityPeriod, timeout);
-    
-    if (result) {
-      console.log('✅ Page DOM is stable');
-    } else {
-      console.warn('⚠️ Page stability timeout - DOM may still be changing');
+        if (stableChecksPassed >= checksNeeded) {
+          console.log('✅ Page is stable - multiple consecutive checks passed');
+          return true;
+        }
+      } else {
+        // Reset stability counter if page changed significantly
+        if (stableChecksPassed > 0) {
+          console.log(`⚠️ Page changed - resetting stability (elements: ${lastElementCount}→${currentState.elementCount}, buttons: ${lastButtonCount}→${currentState.buttonCount})`);
+        }
+        stableChecksPassed = 0;
+      }
+      
+      lastElementCount = currentState.elementCount;
+      lastButtonCount = currentState.buttonCount;
+      
+      // Wait before next check
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
     
-    return result;
+    console.warn('⚠️ Page stability timeout - DOM may still be changing');
+    return false;
     
   } catch (error) {
     console.warn('Page stability check failed:', (error as Error).message);
@@ -1050,195 +1051,134 @@ export async function waitForPageStability(page: Page, stabilityPeriod: number =
 /**
  * Enhanced LinkedIn page loading validation with comprehensive content detection
  */
-export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'profile' | 'feed' | 'search' = 'profile', timeout: number = 30000): Promise<boolean> {
+export async function waitForLinkedInPageLoad(page: Page, expectedPageType: 'profile' | 'feed' | 'search' = 'profile', timeout: number = 15000): Promise<boolean> {
   const startTime = Date.now();
   console.log(`Waiting for LinkedIn ${expectedPageType} page to load completely...`);
   
-  // First wait for basic page readiness
+  // First wait for basic page readiness with shorter timeout
   try {
-    await page.waitForSelector('body', { timeout: 10000 });
+    await page.waitForSelector('body', { timeout: 5000 });
   } catch (error) {
     console.warn('Body element timeout, continuing...');
   }
   
-  // Then wait for page stability to prevent race conditions
-  console.log('Checking for page stability...');
-  const isStable = await waitForPageStability(page, 3000, 15000); // 3 second stability period
-  if (!isStable) {
-    console.warn('Page not fully stable, but proceeding with validation...');
+  // Wait for BIGPIPE rendering to complete (LinkedIn-specific)
+  console.log('Waiting for LinkedIn BIGPIPE rendering to complete...');
+  let bigpipeComplete = false;
+  const bigpipeStartTime = Date.now();
+  
+  while (!bigpipeComplete && (Date.now() - bigpipeStartTime) < 8000) {
+    try {
+      const bodyClasses = await safeEvaluate(page, () => {
+        return document.body?.className || '';
+      }, 1000);
+      
+      if (typeof bodyClasses === 'string') {
+        bigpipeComplete = !bodyClasses.includes('render-mode-BIGPIPE');
+        if (bigpipeComplete) {
+          console.log('✅ LinkedIn BIGPIPE rendering completed');
+          break;
+        }
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } catch (error) {
+      console.warn('BIGPIPE check failed:', (error as Error).message);
+      break; // Continue with reduced confidence
+    }
   }
   
+  // Quick stability check with reduced timing
+  console.log('Performing lightweight page stability check...');
+  const isStable = await waitForPageStability(page, 1000, 5000); // Reduced timing
+  if (!isStable) {
+    console.warn('Page not fully stable, but proceeding with progressive validation...');
+  }
+  
+  // Progressive validation with shorter evaluation cycles
   while (Date.now() - startTime < timeout) {
     try {
-      const pageState = await page.evaluate((pageType) => {
-        // Check basic page structure
-        const hasGlobalNav = !!document.querySelector('.global-nav');
-        const hasMainContent = !!document.querySelector('main');
-        const bodyClasses = document.body?.className || '';
-        
-        // Check for LinkedIn error states
-        const hasErrorPage = !!document.querySelector('.error-page, .not-found-page');
-        const hasLoginWall = !!document.querySelector('.auth-wall, .login-form');
-        const hasRateLimitError = document.body.textContent?.includes('rate limit') || 
-                                 document.body.textContent?.includes('too many requests');
-        
-        // Page-specific validations
-        let pageSpecificCheck = false;
-        let profileData = null;
-        
-        if (pageType === 'profile') {
-          // Enhanced profile page detection with 2024/2025 LinkedIn DOM structure
-          const profileHeaderSelectors = [
-            // Current LinkedIn selectors (2024/2025)
-            '.profile-topcard', '.profile-topcard-person-entity', 
-            '.pv-top-card', '.pv-top-card-v2', '.pvs-header',
-            // Modern layout selectors
-            '.scaffold-layout-toolbar', '.profile-header',
-            '[data-view-name="profile-topcard"]', '[data-view-name="profile-header"]',
-            // Content-based fallbacks
-            '.artdeco-card .profile', '.profile-photo-edit',
-            // Generic profile containers
-            'section[data-section="topcard"]', 'section[data-section="summary"]'
-          ];
+      // Use safer evaluation with strict timeout control
+      const pageState = await Promise.race([
+        safeEvaluate(page, () => {
+          // Quick essential checks only
+          const hasGlobalNav = !!document.querySelector('.global-nav');
+          const hasMainContent = !!document.querySelector('main');
+          const readyState = document.readyState;
           
-          const profileActionsSelectors = [
-            // Current action button containers
-            '.pv-s-profile-actions', '.pvs-profile-actions', '.profile-actions',
-            '.profile-topcard-actions', '.profile-topcard__actions',
-            // Modern layout actions
-            '.scaffold-layout-toolbar__actions', '.profile-header-actions',
-            '[data-view-name="profile-actions"]', '[data-control-name="hero_cta_container"]',
-            // Button containers
-            '.artdeco-card .profile-actions', '.profile-topcard .actions',
-            // Generic containers with buttons
-            'div:has(button[aria-label*="Connect"])', 'div:has(button[aria-label*="Message"])',
-            'div:has(button[aria-label*="Vernetzen"])', 'div:has(button[aria-label*="Nachricht"])'
-          ];
+          // Essential error checks
+          const hasErrorPage = !!document.querySelector('.error-page, .not-found-page');
+          const hasLoginWall = !!document.querySelector('.auth-wall, .login-form');
           
-          const profileNameSelectors = [
-            // Current name selectors
-            '.text-heading-xlarge', '.pv-text-details__left-panel h1', '.top-card-layout__title',
-            // Modern selectors
-            '.profile-topcard__title', '.profile-topcard-person-entity__name',
-            '.scaffold-layout-toolbar h1', '.profile-header h1',
-            // Fallback patterns
-            '[data-view-name="profile-topcard"] h1', 'h1.profile-name',
-            // Content-based patterns
-            'h1[class*="heading"]', 'h1[class*="title"]', 'h1[class*="name"]'
-          ];
+          // Simplified profile detection for profile pages - essential selectors only
+          const profileHeader = document.querySelector('.pv-top-card, .pvs-header, .profile-topcard, [data-view-name="profile-topcard"]');
+          const profileActions = document.querySelector('.pv-s-profile-actions, .pvs-profile-actions, .profile-actions');
+          const hasButtons = document.querySelectorAll('button').length > 0;
+          const isProfileUrl = window.location.href.includes('/in/');
           
-          // Try multiple selectors for better detection
-          let profileHeader = null;
-          let profileActions = null;
-          let profileName = '';
-          
-          // Find profile header with multiple strategies
-          for (const selector of profileHeaderSelectors) {
-            profileHeader = document.querySelector(selector);
-            if (profileHeader) break;
-          }
-          
-          // Find profile actions with multiple strategies  
-          for (const selector of profileActionsSelectors) {
-            profileActions = document.querySelector(selector);
-            if (profileActions) break;
-          }
-          
-          // Find profile name with multiple strategies
-          for (const selector of profileNameSelectors) {
-            const nameElement = document.querySelector(selector);
-            if (nameElement?.textContent?.trim()) {
-              profileName = nameElement.textContent.trim();
-              break;
-            }
-          }
-          
-          // Additional content-based validation
-          const hasConnectButton = !!document.querySelector('button[aria-label*="Connect"], button[aria-label*="Vernetzen"]');
-          const hasMessageButton = !!document.querySelector('button[aria-label*="Message"], button[aria-label*="Nachricht"]');
-          const hasProfileContent = !!document.querySelector('[data-section], .profile-section, .pvs-list');
-          
-          // More flexible page validation - if we have profile content OR action buttons, consider it valid
-          const hasProfileStructure = !!(profileHeader || profileActions || hasConnectButton || hasMessageButton);
-          const hasProfileData = !!(profileName || hasProfileContent);
-          
-          pageSpecificCheck = hasProfileStructure && hasProfileData;
-          profileData = {
+          const pageSpecificCheck = isProfileUrl ? (!!profileHeader && hasButtons) : hasMainContent;
+          const profileData = isProfileUrl ? {
             hasProfileHeader: !!profileHeader,
             hasProfileActions: !!profileActions,
-            profileName: profileName || '',
-            buttonsFound: document.querySelectorAll('button').length,
-            hasConnectButton,
-            hasMessageButton,
-            hasProfileContent,
-            detectionStrategy: profileHeader ? 'header' : profileActions ? 'actions' : hasConnectButton ? 'connect-button' : 'fallback'
+            buttonCount: document.querySelectorAll('button').length
+          } : null;
+          
+          return {
+            hasGlobalNav,
+            hasMainContent,
+            hasErrorPage,
+            hasLoginWall,
+            pageSpecificCheck,
+            profileData,
+            readyState,
+            totalElements: document.querySelectorAll('*').length,
+            totalButtons: document.querySelectorAll('button').length,
+            timestamp: Date.now()
           };
-        } else if (pageType === 'feed') {
-          // Feed page specific checks
-          pageSpecificCheck = !!document.querySelector('.feed-container, .scaffold-layout__content');
-        }
-        
-        // JavaScript execution check
-        const jsWorking = typeof window.navigator !== 'undefined' && 
-                         typeof document.querySelector !== 'undefined';
-        
-        // Network connectivity check
-        const hasNetworkContent = document.querySelectorAll('img[src*="media.licdn"], img[src*="static.licdn"]').length > 0;
-        
-        return {
-          hasGlobalNav,
-          hasMainContent,
-          hasErrorPage,
-          hasLoginWall,
-          hasRateLimitError,
-          pageSpecificCheck,
-          profileData,
-          jsWorking,
-          hasNetworkContent,
-          bodyClasses,
-          totalElements: document.querySelectorAll('*').length,
-          totalButtons: document.querySelectorAll('button').length,
-          readyState: document.readyState,
-          currentUrl: window.location.href,
-          timestamp: Date.now()
-        };
-      }, expectedPageType);
+        }, 2000), // 2 second max evaluation time
+        new Promise<any>((_, reject) => 
+          setTimeout(() => reject(new Error('Page evaluation timeout')), 3000)
+        )
+      ]);
       
-      // Log detailed page state for debugging
+      // Check if evaluation failed or returned invalid data
+      if (!pageState || typeof pageState !== 'object') {
+        console.warn('⚠️ Page evaluation returned invalid data, retrying...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
+      
+      // Quick error checks
+      if (pageState.hasErrorPage) {
+        console.error('❌ LinkedIn error page detected');
+        return false;
+      }
+      
+      if (pageState.hasLoginWall) {
+        console.error('❌ LinkedIn login wall detected');
+        return false;
+      }
+      
+      // Log essential page state only
       console.log('LinkedIn page state:', {
         readyState: pageState.readyState,
         totalElements: pageState.totalElements,
         totalButtons: pageState.totalButtons,
         hasGlobalNav: pageState.hasGlobalNav,
         hasMainContent: pageState.hasMainContent,
-        pageSpecificCheck: pageState.pageSpecificCheck,
-        jsWorking: pageState.jsWorking,
-        hasNetworkContent: pageState.hasNetworkContent
+        pageSpecificCheck: pageState.pageSpecificCheck
       });
       
       if (pageState.profileData) {
         console.log('Profile page data:', pageState.profileData);
       }
       
-      // Check for error conditions first
-      if (pageState.hasErrorPage) {
-        throw new Error('LinkedIn error page detected');
-      }
-      
-      if (pageState.hasLoginWall) {
-        throw new Error('LinkedIn login wall detected - authentication failed');
-      }
-      
-      if (pageState.hasRateLimitError) {
-        throw new Error('LinkedIn rate limit detected');
-      }
-      
-      // Check for successful page load
+      // Check for successful page load with reduced requirements
       const isLoaded = pageState.hasGlobalNav && 
                       pageState.hasMainContent && 
                       pageState.pageSpecificCheck && 
-                      pageState.jsWorking &&
-                      pageState.totalElements > 100 && // Minimum DOM complexity
+                      pageState.readyState === 'complete' &&
+                      pageState.totalElements > 50 && // Reduced threshold
                       pageState.totalButtons > 0; // At least some buttons
       
       if (isLoaded) {
@@ -1266,148 +1206,48 @@ export async function validateProfilePage(page: Page): Promise<{ isValid: boolea
   console.log('Running multi-strategy profile validation...');
   
   try {
-    const validation = await page.evaluate(() => {
-      const strategies = [];
-      
-      // Strategy 1: CSS Selector Based Detection
-      const cssValidation = () => {
-        const profileSelectors = [
-          '.profile-topcard', '.pv-top-card', '.pvs-header',
-          '.scaffold-layout-toolbar', '.profile-header'
-        ];
-        const actionSelectors = [
-          '.pv-s-profile-actions', '.pvs-profile-actions',
-          '.profile-topcard-actions', '.scaffold-layout-toolbar__actions'
-        ];
+    // Use safe evaluation with timeout protection instead of complex page.evaluate
+    const validation = await Promise.race([
+      safeEvaluate(page, () => {
+        // Quick essential validation only - simplified to prevent execution context destruction
+        const profileHeader = document.querySelector('.pv-top-card, .pvs-header, .profile-topcard');
+        const hasButtons = document.querySelectorAll('button').length > 0;
+        const isProfileUrl = window.location.href.includes('/in/');
+        const hasName = !!document.querySelector('h1');
         
-        let profileSection = null;
-        let actionSection = null;
+        // Simple confidence scoring
+        let confidence = 0;
+        if (profileHeader) confidence += 0.4;
+        if (hasButtons) confidence += 0.3;
+        if (isProfileUrl) confidence += 0.2;
+        if (hasName) confidence += 0.1;
         
-        for (const selector of profileSelectors) {
-          profileSection = document.querySelector(selector);
-          if (profileSection) break;
-        }
-        
-        for (const selector of actionSelectors) {
-          actionSection = document.querySelector(selector);
-          if (actionSection) break;
-        }
+        const isValid = confidence >= 0.5;
         
         return {
-          strategy: 'css-selectors',
-          valid: !!(profileSection && actionSection),
-          confidence: profileSection && actionSection ? 0.9 : profileSection ? 0.6 : 0.1,
-          details: { hasProfile: !!profileSection, hasActions: !!actionSection }
-        };
-      };
-      
-      // Strategy 2: Content-Based Detection
-      const contentValidation = () => {
-        const nameSelectors = [
-          'h1', '[class*="heading"]', '[class*="title"]', '[class*="name"]'
-        ];
-        const headlineSelectors = [
-          '[class*="headline"]', '[class*="subtitle"]', '.pv-shared-text-with-see-more'
-        ];
-        
-        let profileName = '';
-        let headline = '';
-        
-        for (const selector of nameSelectors) {
-          const element = document.querySelector(selector);
-          const text = element?.textContent?.trim() || '';
-          if (text && text.length > 2 && text.length < 100) {
-            profileName = text;
-            break;
-          }
-        }
-        
-        for (const selector of headlineSelectors) {
-          const element = document.querySelector(selector);
-          const text = element?.textContent?.trim() || '';
-          if (text && text.length > 10) {
-            headline = text;
-            break;
-          }
-        }
-        
-        return {
-          strategy: 'content-based',
-          valid: !!(profileName && headline),
-          confidence: profileName && headline ? 0.8 : profileName ? 0.5 : 0.1,
-          details: { profileName, headline }
-        };
-      };
-      
-      // Strategy 3: Button-Based Detection
-      const buttonValidation = () => {
-        const connectButtons = document.querySelectorAll('button[aria-label*="Connect"], button[aria-label*="Vernetzen"]');
-        const messageButtons = document.querySelectorAll('button[aria-label*="Message"], button[aria-label*="Nachricht"]');
-        const pendingButtons = document.querySelectorAll('button[aria-label*="Pending"], button[aria-label*="Ausstehend"]');
-        
-        const totalActionButtons = connectButtons.length + messageButtons.length + pendingButtons.length;
-        const hasProfileActions = totalActionButtons > 0;
-        
-        return {
-          strategy: 'button-based',
-          valid: hasProfileActions,
-          confidence: hasProfileActions ? 0.7 : 0.1,
-          details: { 
-            connectButtons: connectButtons.length, 
-            messageButtons: messageButtons.length,
-            pendingButtons: pendingButtons.length
+          isValid,
+          strategy: 'simplified',
+          confidence,
+          details: {
+            hasProfileHeader: !!profileHeader,
+            hasButtons,
+            isProfileUrl,
+            hasName,
+            buttonCount: document.querySelectorAll('button').length
           }
         };
-      };
-      
-      // Strategy 4: URL Pattern + Basic Structure
-      const urlValidation = () => {
-        const isProfileURL = window.location.pathname.includes('/in/');
-        const hasBasicStructure = !!document.querySelector('main') && document.querySelectorAll('button').length > 5;
-        const hasLinkedInAssets = document.querySelectorAll('[src*="licdn"], [href*="licdn"]').length > 10;
-        
-        return {
-          strategy: 'url-structure',
-          valid: isProfileURL && hasBasicStructure && hasLinkedInAssets,
-          confidence: isProfileURL && hasBasicStructure ? 0.6 : 0.2,
-          details: { isProfileURL, hasBasicStructure, hasLinkedInAssets }
-        };
-      };
-      
-      // Run all strategies
-      strategies.push(cssValidation());
-      strategies.push(contentValidation());
-      strategies.push(buttonValidation());
-      strategies.push(urlValidation());
-      
-      // Find best strategy
-      const validStrategies = strategies.filter(s => s.valid);
-      const bestStrategy = strategies.reduce((best, current) => 
-        current.confidence > best.confidence ? current : best
-      );
-      
-      return {
-        strategies,
-        bestStrategy,
-        overallValid: validStrategies.length >= 2 || bestStrategy.confidence >= 0.7,
-        confidence: Math.max(...strategies.map(s => s.confidence)),
-        validCount: validStrategies.length
-      };
-    });
+      }, 2000), // 2 second max evaluation time
+      new Promise<any>((_, reject) => 
+        setTimeout(() => reject(new Error('Profile validation timeout')), 3000)
+      )
+    ]);
     
-    console.log('Profile validation results:', {
-      isValid: validation.overallValid,
-      strategy: validation.bestStrategy.strategy,
-      confidence: validation.confidence,
-      validStrategies: validation.validCount
-    });
+    if (!validation || typeof validation !== 'object') {
+      throw new Error('Validation returned invalid data');
+    }
     
-    return {
-      isValid: validation.overallValid,
-      strategy: validation.bestStrategy.strategy,
-      confidence: validation.confidence,
-      details: validation
-    };
+    console.log(`Profile validation result: ${validation.isValid ? '✅ Valid' : '❌ Invalid'} (confidence: ${validation.confidence})`);
+    return validation;
     
   } catch (error) {
     console.error('Profile validation failed:', (error as Error).message);

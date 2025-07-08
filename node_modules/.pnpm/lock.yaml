@@ -171,9 +171,15 @@ importers:
         specifier: ^2.11.2
         version: 2.11.2(puppeteer-extra@3.3.6(@types/puppeteer@7.0.4(typescript@5.8.3))(puppeteer-core@24.11.2)(puppeteer@24.11.2(typescript@5.8.3)))
     devDependencies:
+      '@types/node':
+        specifier: ^24.0.10
+        version: 24.0.10
       '@types/puppeteer':
         specifier: ^7.0.4
         version: 7.0.4(typescript@5.8.3)
+      typescript:
+        specifier: ^5.8.3
+        version: 5.8.3
 
   packages/shared:
     dependencies:

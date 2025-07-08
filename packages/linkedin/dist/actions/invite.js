@@ -4,6 +4,9 @@ exports.sendInvitation = sendInvitation;
 const shared_1 = require("@linkedin-bot-suite/shared");
 const browserHealth_1 = require("../utils/browserHealth");
 async function sendInvitation(page, profileUrl, note) {
+    // Check activity patterns and respect business hours
+    const activityPattern = (0, browserHealth_1.getActivityPattern)();
+    console.log(`Activity pattern: ${activityPattern.isActiveHour ? 'Active' : 'Inactive'} hour (${activityPattern.activityMultiplier}x speed)`);
     // Validate profile URL before navigation
     if (!profileUrl || !profileUrl.includes('linkedin.com/in/')) {
         throw new Error(`Invalid LinkedIn profile URL: ${profileUrl}`);
@@ -54,11 +57,63 @@ async function sendInvitation(page, profileUrl, note) {
         throw new Error(`Failed to navigate to profile after trying all strategies. Last error: ${lastError?.message || 'Unknown error'}`);
     }
     try {
-        // Wait for LinkedIn page to be fully ready
-        console.log('Waiting for LinkedIn profile page to be ready...');
-        const pageReady = await (0, browserHealth_1.waitForLinkedInPageReady)(page, 'profile', 20000);
-        if (!pageReady) {
-            console.warn('LinkedIn page readiness timeout, but proceeding with caution');
+        // Enhanced page loading with context destruction recovery
+        console.log('Validating LinkedIn page loading with recovery mechanisms...');
+        let validationAttempts = 0;
+        const maxValidationAttempts = 2;
+        let pageValidated = false;
+        while (!pageValidated && validationAttempts < maxValidationAttempts) {
+            try {
+                validationAttempts++;
+                console.log(`Page validation attempt ${validationAttempts}/${maxValidationAttempts}`);
+                // Step 1: Basic page loading with reduced timeout
+                const pageLoaded = await (0, browserHealth_1.waitForLinkedInPageLoad)(page, 'profile', 15000);
+                if (!pageLoaded) {
+                    if (validationAttempts >= maxValidationAttempts) {
+                        console.log('Basic page loading failed, analyzing page structure...');
+                        await (0, browserHealth_1.analyzePageStructure)(page);
+                        throw new Error('LinkedIn profile page failed to load properly after multiple attempts');
+                    }
+                    console.warn('Page loading failed, retrying...');
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    continue;
+                }
+                // Step 2: Simplified profile validation with recovery
+                console.log('Running simplified profile validation...');
+                const profileValidation = await (0, browserHealth_1.validateProfilePage)(page);
+                if (!profileValidation.isValid) {
+                    if (profileValidation.confidence < 0.3 && validationAttempts >= maxValidationAttempts) {
+                        console.log('Running final page analysis before failing...');
+                        await (0, browserHealth_1.analyzePageStructure)(page);
+                        throw new Error(`Profile page validation failed - insufficient confidence (${profileValidation.confidence}) after ${validationAttempts} attempts`);
+                    }
+                    else if (profileValidation.confidence < 0.3) {
+                        console.warn('Low confidence validation, retrying...');
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        continue;
+                    }
+                    else {
+                        console.warn(`Low confidence (${profileValidation.confidence}) but proceeding...`);
+                    }
+                }
+                else {
+                    console.log(`✅ Profile validated successfully (confidence: ${profileValidation.confidence})`);
+                }
+                pageValidated = true;
+            }
+            catch (error) {
+                const errorMessage = error.message;
+                if (errorMessage.includes('Execution context was destroyed') ||
+                    errorMessage.includes('Target closed') ||
+                    errorMessage.includes('Session closed')) {
+                    console.warn(`Context destruction detected on attempt ${validationAttempts}, retrying...`);
+                    if (validationAttempts < maxValidationAttempts) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        continue;
+                    }
+                }
+                throw error;
+            }
         }
         // Simulate human behavior on the profile page
         console.log('Simulating human behavior...');
@@ -97,46 +152,59 @@ async function sendInvitation(page, profileUrl, note) {
             }
             // Continue if pending button not found (good - means no pending invitation)
         }
-        // Enhanced Connect button discovery with multiple patterns
-        console.log('Looking for Connect button with enhanced discovery...');
+        // Multi-stage Connect button discovery with comprehensive analysis
+        console.log('Starting multi-stage Connect button discovery...');
         let connectButton;
+        // Stage 1: Comprehensive page analysis first
+        console.log('Stage 1: Analyzing page structure before button search...');
+        const preSearchAnalysis = await (0, browserHealth_1.analyzePageStructure)(page);
+        if (!preSearchAnalysis || preSearchAnalysis.buttonAnalysis.totalButtons === 0) {
+            throw new Error('No buttons found on page - page may not have loaded properly or profile is inaccessible');
+        }
+        console.log(`Found ${preSearchAnalysis.buttonAnalysis.totalButtons} total buttons, ${preSearchAnalysis.buttonAnalysis.connectButtons} Connect buttons, ${preSearchAnalysis.buttonAnalysis.messageButtons} Message buttons`);
+        // Stage 2: Wait for buttons to be rendered and stable
+        console.log('Stage 2: Waiting for buttons to be stable...');
+        await new Promise(resolve => setTimeout(resolve, (0, browserHealth_1.humanDelay)(2000, 50)));
+        // Stage 3: Enhanced Connect button search with multiple strategies
+        console.log('Stage 3: Searching for Connect button with enhanced patterns...');
         try {
             const connectSelectors = shared_1.LINKEDIN_SELECTORS.CONNECT_BUTTON.split(', ');
             connectButton = await (0, browserHealth_1.waitForButtonWithMultipleSelectors)(page, connectSelectors, {
-                timeout: 15000,
+                timeout: 20000, // Increased timeout
                 visible: true,
                 enabled: true
             });
+            console.log('✅ Connect button found successfully');
         }
         catch (error) {
-            // Enhanced error reporting with page analysis
-            const currentUrl = page.url();
-            const pageTitle = await page.title();
-            // Try to get more debugging info about the page state
-            const pageAnalysis = await page.evaluate(() => {
-                const allButtons = Array.from(document.querySelectorAll('button'));
-                const buttonInfo = allButtons.slice(0, 10).map(btn => ({
-                    text: btn.textContent?.trim().substring(0, 50) || '',
-                    ariaLabel: btn.getAttribute('aria-label') || '',
-                    className: btn.className,
-                    dataControlName: btn.getAttribute('data-control-name') || ''
-                }));
-                return {
-                    totalButtons: allButtons.length,
-                    buttonSample: buttonInfo,
-                    profileActions: !!document.querySelector('.pv-s-profile-actions, .pvs-profile-actions, .profile-actions'),
-                    hasProfileHeader: !!document.querySelector('.pv-top-card, .pvs-header'),
-                    isLinkedInProfile: window.location.pathname.includes('/in/')
-                };
-            });
-            console.error('Enhanced Connect button search failed:', {
-                currentUrl,
-                pageTitle,
+            console.error('Connect button search failed, running final analysis...');
+            // Stage 4: Final comprehensive analysis for debugging
+            const finalAnalysis = await (0, browserHealth_1.analyzePageStructure)(page);
+            console.error('Final button search analysis:', {
                 profileUrl,
-                pageAnalysis,
+                currentUrl: page.url(),
+                pageTitle: await page.title(),
+                preSearchButtons: preSearchAnalysis.buttonAnalysis.totalButtons,
+                finalButtons: finalAnalysis?.buttonAnalysis.totalButtons || 0,
+                connectButtonsFound: finalAnalysis?.buttonAnalysis.connectButtons || 0,
+                messageButtonsFound: finalAnalysis?.buttonAnalysis.messageButtons || 0,
+                profileStructure: finalAnalysis?.linkedinStructure || {},
+                buttonDetails: finalAnalysis?.buttonAnalysis.buttonDetails || [],
                 originalError: error.message
             });
-            throw new Error('Connect button not found - user may already be connected, profile is private, or page failed to load properly');
+            // Provide more specific error messages based on analysis
+            if (finalAnalysis?.buttonAnalysis.messageButtons > 0) {
+                throw new Error('User is already connected - Message button found instead of Connect button');
+            }
+            else if (finalAnalysis?.linkedinStructure.hasErrorIndicators) {
+                throw new Error('LinkedIn error detected - profile may be unavailable or rate limited');
+            }
+            else if (!finalAnalysis?.linkedinStructure.hasProfileActions) {
+                throw new Error('Profile actions section not found - profile may be private or restricted');
+            }
+            else {
+                throw new Error(`Connect button not found after comprehensive search - found ${finalAnalysis?.buttonAnalysis.totalButtons || 0} total buttons, but no Connect button available`);
+            }
         }
         // Click the found connect button directly
         console.log('Connect button found, clicking with human-like timing...');
@@ -157,16 +225,18 @@ async function sendInvitation(page, profileUrl, note) {
                     await new Promise(resolve => setTimeout(resolve, clickDelay));
                     return true;
                 }, { timeout: 8000, retries: 2 });
-                // Use safe element interaction for note field
+                // Use enhanced LinkedIn-specific typing for note field
                 await (0, browserHealth_1.safeElementInteraction)(page, 'textarea[name="message"]', async (noteField) => {
                     await noteField.click({ clickCount: 3 }); // Select all existing text
-                    const typingDelay = Math.floor(Math.random() * 80) + 40; // More realistic typing speed
-                    await noteField.type(note, { delay: typingDelay });
-                    const afterTypingDelay = (0, browserHealth_1.humanDelay)(1000, 70); // Variable pause after typing
-                    await new Promise(resolve => setTimeout(resolve, afterTypingDelay));
-                    console.log('Personal note added successfully');
+                    await new Promise(resolve => setTimeout(resolve, (0, browserHealth_1.humanDelay)(200, 40))); // Brief pause after selection
+                    // Use LinkedIn-specific typing for note context
+                    await (0, browserHealth_1.linkedInTyping)(page, note, 'note', {
+                        element: noteField
+                    });
+                    console.log('Personal note added successfully with human-like typing patterns');
                     return true;
-                }, { timeout: 5000, retries: 2 });
+                }, { timeout: 8000, retries: 2 } // Increased timeout for longer typing simulation
+                );
             }
             catch (error) {
                 console.warn('Note addition failed, proceeding without note:', error.message);
