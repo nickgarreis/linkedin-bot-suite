@@ -70,7 +70,7 @@ export async function initLinkedInContext(
   const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
   console.log('Using user agent:', randomUserAgent);
   
-  // Enhanced Chrome configuration optimized for LinkedIn compatibility
+  // Enhanced Chrome configuration optimized for LinkedIn compatibility and bot detection evasion
   const launchOptions: any = {
     headless: 'new',
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
@@ -81,22 +81,31 @@ export async function initLinkedInContext(
       '--disable-setuid-sandbox', 
       '--disable-dev-shm-usage',
       '--disable-gpu',
+      '--disable-gpu-sandbox',
       
       // User data (required)
       `--user-data-dir=${userDataDir}`,
       
-      // Enable JavaScript features needed for LinkedIn
+      // JavaScript and automation detection evasion
       '--enable-javascript',
-      '--enable-web-security',
+      '--disable-blink-features=AutomationControlled', // Critical: Hide automation markers
+      '--disable-web-security', // Required for LinkedIn cross-origin resources
       '--allow-running-insecure-content',
       
-      // Network and rendering for dynamic content
-      '--disable-web-security', // Temporary for debugging
-      '--disable-features=VizDisplayCompositor',
-      '--disable-ipc-flooding-protection',
-      '--enable-features=NetworkService',
+      // Network configuration for containers (CRITICAL for LinkedIn)
+      '--disable-features=NetworkService',
+      '--enable-features=NetworkServiceInProcess', 
+      '--ignore-certificate-errors-spki-list',
+      '--ignore-ssl-errors',
+      '--ignore-certificate-errors',
+      '--disable-site-isolation-trials',
+      '--disable-features=BlockInsecurePrivateNetworkRequests',
+      '--aggressive-cache-discard',
+      '--disable-background-networking',
       
-      // Memory and performance
+      // Rendering and performance optimization
+      '--disable-features=VizDisplayCompositor,TranslateUI,BlinkGenPropertyTrees',
+      '--disable-ipc-flooding-protection',
       '--memory-pressure-off',
       '--no-default-browser-check',
       '--no-first-run',
@@ -105,10 +114,12 @@ export async function initLinkedInContext(
       '--disable-renderer-backgrounding',
       '--disable-backgrounding-occluded-windows',
       
-      // Display and interaction
-      '--window-size=1366,768',
+      // Bot detection evasion - more human-like browser
+      '--window-size=1920,1080', // Increased for more human-like resolution
+      '--start-maximized',
       '--disable-extensions',
       '--disable-plugins',
+      '--disable-features=IsolateOrigins,site-per-process', // Stability for dynamic content
       
       ...(proxy ? [`--proxy-server=${proxy}`] : [])
     ]
