@@ -2392,6 +2392,7 @@ async function validateElement(element: any, page: Page): Promise<{ isValid: boo
                    style.opacity !== '0',
         isClickable: !(el as HTMLButtonElement).disabled && style.pointerEvents !== 'none',
         tagName: el.tagName.toLowerCase(),
+        role: el.getAttribute('role') || '',
         ariaLabel: el.getAttribute('aria-label') || '',
         textContent: el.textContent?.trim() || ''
       };
@@ -2405,11 +2406,13 @@ async function validateElement(element: any, page: Page): Promise<{ isValid: boo
       return { isValid: false, reason: 'Element not clickable' };
     }
     
-    if (elementInfo.tagName !== 'button') {
-      return { isValid: false, reason: 'Element is not a button' };
+    // Allow modern LinkedIn controls that are not <button>
+    const allowedTags = ['button', 'div', 'span', 'a'];
+    if (!allowedTags.includes(elementInfo.tagName) && elementInfo.role !== 'button') {
+      return { isValid: false, reason: `Unsupported tag: ${elementInfo.tagName} (role: ${elementInfo.role})` };
     }
     
-    return { isValid: true, reason: `Valid button: "${elementInfo.ariaLabel || elementInfo.textContent}"` };
+    return { isValid: true, reason: `Valid button: "${elementInfo.ariaLabel || elementInfo.textContent}" (${elementInfo.tagName}${elementInfo.role ? `[role="${elementInfo.role}"]` : ''})` };
     
   } catch (error) {
     return { isValid: false, reason: `Validation error: ${error}` };
