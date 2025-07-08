@@ -2054,6 +2054,50 @@ export async function findLinkedInButton(
     console.warn('⚠️ DOM appears unstable, proceeding with caution');
   }
   
+  // Phase 2: Better page loading wait - LinkedIn needs more time to fully load
+  console.log('⏳ Waiting for LinkedIn page to fully load...');
+  try {
+    let retryCount = 0;
+    const maxRetries = 10;
+    
+    while (retryCount < maxRetries) {
+      const loadingState = await safeEvaluate(page, () => {
+        const elementCount = document.querySelectorAll('*').length;
+        const buttonCount = document.querySelectorAll('button, [role="button"]').length;
+        const hasLinkedInStructure = !!document.querySelector('.global-nav, .navigation-wrapper, [data-view-name]');
+        const bigpipeComplete = !document.body?.className?.includes('render-mode-BIGPIPE');
+        const hasProfileArea = !!document.querySelector('.pv-top-card, .pvs-header, .profile-header, .pv-s-profile-actions');
+        
+        return {
+          elementCount,
+          buttonCount,
+          hasLinkedInStructure,
+          bigpipeComplete,
+          hasProfileArea,
+          readyState: document.readyState
+        };
+      }, 3000);
+      
+      if (loadingState && typeof loadingState === 'object' && 
+          'elementCount' in loadingState && typeof loadingState.elementCount === 'number' &&
+          'buttonCount' in loadingState && typeof loadingState.buttonCount === 'number' &&
+          loadingState.elementCount > 200 && loadingState.buttonCount > 0) {
+        console.log(`✅ LinkedIn page loaded: ${loadingState.elementCount} elements, ${loadingState.buttonCount} buttons`);
+        break;
+      }
+      
+      console.log(`⏳ Page still loading (attempt ${retryCount + 1}/${maxRetries}), waiting 2s...`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      retryCount++;
+    }
+    
+    if (retryCount >= maxRetries) {
+      console.warn('⚠️ LinkedIn page load timeout, proceeding anyway');
+    }
+  } catch (loadError) {
+    console.warn('⚠️ Page load check failed:', loadError);
+  }
+  
   // Scroll profile card into view to ensure buttons are visible
   console.log('📍 Scrolling profile card into view...');
   try {
@@ -2136,10 +2180,21 @@ export async function findLinkedInButton(
     try {
       for (const selector of strategy.selectors) {
         try {
-          const element = await page.waitForSelector(selector, { 
-            timeout: 1500, // Increased slightly for stability
-            visible: true 
-          });
+          let element = null;
+          
+          // Handle XPath selectors (start with //)
+          if (selector.startsWith('//')) {
+            const elements = await (page as any).$x(selector);
+            if (elements.length > 0) {
+              element = elements[0];
+            }
+          } else {
+            // Handle CSS selectors
+            element = await page.waitForSelector(selector, { 
+              timeout: 1500, // Increased slightly for stability
+              visible: true 
+            });
+          }
           
           if (element) {
             // Enhanced element validation
@@ -2170,6 +2225,48 @@ export async function findLinkedInButton(
       console.warn(`Strategy ${strategy.name} failed:`, error);
       continue;
     }
+  }
+  
+  // Phase 2: Text-based fallback - iterate over all elements for text matching
+  console.log(`🔍 Trying text-based fallback for ${buttonType} button...`);
+  try {
+    const textBasedResult = await findButtonByTextContent(page, buttonType);
+    if (textBasedResult) {
+      console.log(`✅ Found ${buttonType} button using text-based fallback`);
+      return {
+        element: textBasedResult.element,
+        strategy: 'text-based-fallback',
+        confidence: 0.5,
+        selector: textBasedResult.selector
+      };
+    }
+  } catch (textError) {
+    console.warn(`⚠️ Text-based fallback failed:`, textError);
+  }
+  
+  // Phase 2: LinkedIn overflow menu detection - click "More" actions
+  console.log(`🔍 Trying LinkedIn overflow menu for ${buttonType} button...`);
+  try {
+    const overflowResult = await findButtonInOverflowMenu(page, buttonType);
+    if (overflowResult) {
+      console.log(`✅ Found ${buttonType} button in overflow menu`);
+      return {
+        element: overflowResult.element,
+        strategy: 'overflow-menu',
+        confidence: 0.4,
+        selector: overflowResult.selector
+      };
+    }
+  } catch (overflowError) {
+    console.warn(`⚠️ Overflow menu detection failed:`, overflowError);
+  }
+  
+  // Phase 2: Screenshot persistence for debugging
+  console.log(`📸 Capturing screenshot for debugging...`);
+  try {
+    await captureFailureScreenshot(page, buttonType);
+  } catch (screenshotError) {
+    console.warn(`⚠️ Screenshot capture failed:`, screenshotError);
   }
   
   console.log(`❌ No ${buttonType} button found after ${Date.now() - startTime}ms`);
@@ -2512,6 +2609,232 @@ function getFuzzySelectors(buttonType: string): string[] {
         'span[role="button"][aria-label*="note" i]',
         'span[role="button"][aria-label*="notiz" i]'
       ];
+    default:
+      return [];
+  }
+}
+
+/**
+ * Phase 2: Text-based fallback - iterate over all elements for text matching
+ */
+async function findButtonByTextContent(page: Page, buttonType: string): Promise<{element: any, selector: string} | null> {
+  console.log(`🔍 Text-based fallback: searching for ${buttonType} button by text content...`);
+  
+  const buttonTexts = getButtonTexts(buttonType);
+  
+  try {
+    // Set button texts in page context before evaluation
+    await page.evaluate((texts) => {
+      (window as any).buttonTexts = texts;
+    }, buttonTexts);
+    
+    const result = await safeEvaluate(page, () => {
+      // Get button texts from the outer scope
+      const texts = (window as any).buttonTexts;
+      
+      // Search through all clickable elements
+      const clickableElements = document.querySelectorAll('button, [role="button"], a, [onclick], [tabindex]');
+      
+      for (const element of clickableElements) {
+        if (!(element instanceof HTMLElement)) continue;
+        
+        // Check if element is visible
+        const rect = element.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        
+        const style = window.getComputedStyle(element);
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        
+        // Check text content
+        const textContent = element.textContent?.trim() || '';
+        const innerText = element.innerText?.trim() || '';
+        
+        for (const text of texts) {
+          if (textContent.toLowerCase().includes(text.toLowerCase()) || 
+              innerText.toLowerCase().includes(text.toLowerCase())) {
+            
+            // Return element info that can be used to find it again
+            return {
+              tagName: element.tagName.toLowerCase(),
+              className: element.className,
+              id: element.id,
+              textContent: textContent,
+              ariaLabel: element.getAttribute('aria-label'),
+              dataControlName: element.getAttribute('data-control-name'),
+              xpath: getXPathTo(element)
+            };
+          }
+        }
+      }
+      
+      return null;
+      
+      // Helper function to get XPath to element
+      function getXPathTo(element: Element): string {
+        if (element.id !== '') {
+          return `//*[@id="${element.id}"]`;
+        }
+        if (element === document.body) {
+          return '/html/body';
+        }
+        
+        let ix = 0;
+        const siblings = element.parentNode?.childNodes || [];
+        for (let i = 0; i < siblings.length; i++) {
+          const sibling = siblings[i];
+          if (sibling === element) {
+            const tagName = element.tagName.toLowerCase();
+            return getXPathTo(element.parentElement!) + '/' + tagName + '[' + (ix + 1) + ']';
+          }
+          if (sibling.nodeType === 1 && (sibling as Element).tagName === element.tagName) {
+            ix++;
+          }
+        }
+        return '';
+      }
+    }, 8000);
+    
+    if (result && typeof result === 'object' && 'xpath' in result) {
+      // Try to find the element using the XPath
+      const elements = await (page as any).$x(result.xpath);
+      if (elements.length > 0) {
+        console.log(`✅ Text-based fallback found button: "${result.textContent}" at ${result.xpath}`);
+        return {
+          element: elements[0],
+          selector: result.xpath
+        };
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.warn('Text-based fallback failed:', error);
+    return null;
+  }
+}
+
+/**
+ * Phase 2: LinkedIn overflow menu detection - click "More" actions
+ */
+async function findButtonInOverflowMenu(page: Page, buttonType: string): Promise<{element: any, selector: string} | null> {
+  console.log(`🔍 Overflow menu: searching for ${buttonType} button in More actions...`);
+  
+  try {
+    // Look for "More" or "..." buttons
+    const moreSelectors = [
+      'button[aria-label*="more" i]',
+      'button[aria-label*="mehr" i]',
+      'button[title*="more" i]',
+      'button[title*="mehr" i]',
+      '[data-control-name*="more" i]',
+      'div[role="button"][aria-label*="more" i]',
+      'span[role="button"][aria-label*="more" i]'
+    ];
+    
+    // Also try XPath for text-based "More" detection
+    const moreXPaths = [
+      '//button[contains(text(), "...")]',
+      '//button[contains(text(), "More")]',
+      '//button[contains(text(), "Mehr")]',
+      '//div[@role="button" and contains(text(), "...")]',
+      '//span[@role="button" and contains(text(), "...")]'
+    ];
+    
+    let moreButton = null;
+    
+    // Try CSS selectors first
+    for (const selector of moreSelectors) {
+      try {
+        moreButton = await page.waitForSelector(selector, { timeout: 2000, visible: true });
+        if (moreButton) break;
+      } catch (e) {
+        continue;
+      }
+    }
+    
+    // Try XPath selectors if CSS failed
+    if (!moreButton) {
+      for (const xpath of moreXPaths) {
+        try {
+          const elements = await (page as any).$x(xpath);
+          if (elements.length > 0) {
+            moreButton = elements[0];
+            break;
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+    }
+    
+    if (!moreButton) {
+      console.log('No "More" button found in overflow menu detection');
+      return null;
+    }
+    
+    console.log('🔍 Clicking "More" button to reveal overflow menu...');
+    await moreButton.click();
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for menu to open
+    
+    // Now search for the target button in the revealed menu
+    const result = await findButtonByTextContent(page, buttonType);
+    
+    if (result) {
+      console.log(`✅ Found ${buttonType} button in overflow menu`);
+      return result;
+    }
+    
+    return null;
+  } catch (error) {
+    console.warn('Overflow menu detection failed:', error);
+    return null;
+  }
+}
+
+/**
+ * Phase 2: Screenshot persistence for debugging
+ */
+async function captureFailureScreenshot(page: Page, buttonType: string): Promise<void> {
+  console.log(`📸 Capturing failure screenshot for ${buttonType} button...`);
+  
+  try {
+    const screenshot = await page.screenshot({
+      type: 'png',
+      encoding: 'base64',
+      fullPage: false, // Just visible area for smaller size
+      quality: 60 // Reduced quality for smaller file size
+    });
+    
+    // Store screenshot reference for webhook notification
+    // This will be picked up by the webhook service for debugging
+    console.log(`📸 Screenshot captured for ${buttonType} button failure (${screenshot.length} bytes)`);
+    
+    // In a real implementation, you might want to:
+    // 1. Store in temporary storage
+    // 2. Upload to cloud storage
+    // 3. Include in webhook payload
+    // For now, we'll just log the availability
+    
+    return;
+  } catch (error) {
+    console.warn('Screenshot capture failed:', error);
+    return;
+  }
+}
+
+/**
+ * Get button texts for different button types
+ */
+function getButtonTexts(buttonType: string): string[] {
+  switch (buttonType) {
+    case 'connect':
+      return ['Connect', 'Vernetzen', 'Verbinden'];
+    case 'message':
+      return ['Message', 'Nachricht', 'Nachrichten'];
+    case 'send':
+      return ['Send', 'Senden', 'Send invite', 'Einladung senden'];
+    case 'note':
+      return ['Add a note', 'Notiz', 'Add note', 'Notiz hinzufügen'];
     default:
       return [];
   }
