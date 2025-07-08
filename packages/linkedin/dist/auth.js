@@ -101,83 +101,105 @@ async function initLinkedInContext(proxy) {
     const launchOptions = {
         headless: 'new',
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
+        // Critical: Disable CDP features that cause Target.setAutoAttach errors
+        protocolTimeout: 180000, // 3 minutes timeout for protocol operations
         args: [
-            // Essential sandbox and security (minimal set)
+            // Essential container stability (minimal set to avoid Target protocol issues)
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
-            // Basic network configuration (stable for containers)
-            '--disable-features=VizDisplayCompositor',
-            '--disable-ipc-flooding-protection',
-            // User data and profile
+            '--disable-gpu',
+            '--disable-gpu-sandbox',
+            // Critical: Remove single-process and zygote flags that cause Target errors
+            // REMOVED: '--single-process', 
+            // REMOVED: '--no-zygote',
+            // Essential user data management
             `--user-data-dir=${userDataDir}`,
             '--profile-directory=Default',
-            // Display settings (realistic for human users)
-            '--window-size=1366,768', // More common resolution
-            '--disable-gpu', // Required for containers
-            '--disable-gpu-sandbox',
-            // Minimal necessary flags (remove automation indicators)
+            // Basic display (minimal to avoid conflicts)
+            '--window-size=1366,768',
+            '--virtual-time-budget=5000',
+            // Critical: Disable features that interfere with CDP stability
+            '--disable-features=VizDisplayCompositor,TranslateUI,BlinkGenPropertyTrees',
+            '--disable-ipc-flooding-protection',
+            '--disable-renderer-backgrounding',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-background-timer-throttling',
+            // Memory optimization (essential for containers)
+            '--memory-pressure-off',
+            '--max_old_space_size=512',
+            // Minimal automation detection removal
             '--no-first-run',
             '--no-default-browser-check',
             '--disable-default-apps',
             '--disable-prompt-on-repost',
-            '--disable-hang-monitor',
-            '--disable-background-timer-throttling',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-renderer-backgrounding',
-            '--disable-background-mode',
-            // Memory and performance (container optimized)
-            '--memory-pressure-off',
-            '--js-flags=--max-old-space-size=512',
-            '--max_old_space_size=512',
-            // Container-specific requirements
-            '--single-process',
-            '--no-zygote',
-            '--disable-features=AudioServiceOutOfProcess',
-            '--data-path=/tmp/chrome-data',
-            '--homedir=/tmp',
-            // Remove obvious automation flags entirely:
-            // REMOVED: --disable-blink-features=AutomationControlled
-            // REMOVED: --exclude-switches=enable-automation  
-            // REMOVED: --disable-automation
-            // REMOVED: --disable-extensions-except=
-            // REMOVED: --disable-plugins-except=
-            // REMOVED: --disable-infobars
-            // REMOVED: --disable-web-security
-            // REMOVED: --aggressive-cache-discard
-            // REMOVED: --disable-background-networking
-            // REMOVED: --disable-extensions
-            // REMOVED: --disable-plugins
+            '--disable-component-update',
+            // Network stability
+            '--aggressive-cache-discard',
+            '--disable-background-networking',
             ...(proxy ? [`--proxy-server=${proxy}`] : [])
         ]
     };
     let browser = null;
     let page = null;
     try {
-        // Browser launch with retry logic
+        // Browser launch with enhanced retry logic and fallback strategies
         console.log('Launching Chrome browser...');
         let browserLaunched = false;
         let lastLaunchError = null;
         for (let attempt = 1; attempt <= 3; attempt++) {
             try {
-                browser = await pptr.launch(launchOptions);
+                // Use different launch strategies for each attempt
+                let currentLaunchOptions = { ...launchOptions };
+                if (attempt === 2) {
+                    // Second attempt: Even more conservative approach
+                    console.log('Attempt 2: Using ultra-conservative Chrome configuration...');
+                    currentLaunchOptions.args = [
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-gpu',
+                        `--user-data-dir=${userDataDir}`,
+                        '--window-size=1366,768',
+                        '--disable-features=VizDisplayCompositor',
+                        '--no-first-run'
+                    ];
+                    currentLaunchOptions.protocolTimeout = 300000; // 5 minutes
+                }
+                else if (attempt === 3) {
+                    // Third attempt: Absolute minimal configuration
+                    console.log('Attempt 3: Using minimal Chrome configuration as last resort...');
+                    currentLaunchOptions.args = [
+                        '--no-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-gpu',
+                        `--user-data-dir=${userDataDir}`,
+                        '--headless'
+                    ];
+                    currentLaunchOptions.protocolTimeout = 600000; // 10 minutes
+                    currentLaunchOptions.headless = true; // Force old headless mode
+                }
+                browser = await pptr.launch(currentLaunchOptions);
                 browserLaunched = true;
-                console.log(`Browser launched successfully on attempt ${attempt}`);
+                console.log(`✅ Browser launched successfully on attempt ${attempt}`);
                 break;
             }
             catch (launchError) {
                 lastLaunchError = launchError;
-                console.warn(`Browser launch attempt ${attempt}/3 failed: ${launchError.message}`);
-                // If it's a Target protocol error, try with simpler options
+                console.warn(`❌ Browser launch attempt ${attempt}/3 failed: ${launchError.message}`);
+                // Log specific error details for Target protocol issues
                 if (launchError.message.includes('Target.') || launchError.message.includes('Protocol error')) {
-                    if (attempt < 3) {
-                        console.log('Retrying browser launch with simplified options...');
-                        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
-                        continue;
-                    }
+                    console.error(`Target/Protocol error details:`, {
+                        attempt,
+                        errorType: 'CDP_TARGET_ERROR',
+                        message: launchError.message,
+                        stack: launchError.stack?.substring(0, 200)
+                    });
                 }
-                if (attempt === 3) {
-                    throw launchError;
+                if (attempt < 3) {
+                    const waitTime = attempt * 3000; // Progressive delay: 3s, 6s
+                    console.log(`Waiting ${waitTime / 1000}s before retry...`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
                 }
             }
         }
